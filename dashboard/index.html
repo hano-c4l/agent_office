@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Office</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">🏢</span> Agent Office <span class="mode-badge live-only">LIVE</span><span class="mode-badge demo demo-only">DEMO</span></div>
+    <div class="project">
+      <div class="req">Request: <b id="requestText"></b></div>
+      <div class="project-progress"><div class="bar"><i id="projectBar"></i></div><b id="projectPct">0%</b></div>
+    </div>
+    <div class="controls demo-only">
+      <button class="btn primary" id="playBtn">Start</button>
+      <button class="btn" id="stepBtn" title="Run one step">Step</button>
+      <button class="btn" id="resetBtn">Reset</button>
+      <label class="speed">Speed
+        <select id="speedSel"><option value="1">1x</option><option value="2">2x</option><option value="4">4x</option></select>
+      </label>
+    </div>
+  </header>
+
+  <div class="wait-banner" id="waitBanner" hidden>✋ <span id="waitText"></span></div>
+
+  <main class="layout">
+    <section class="office" aria-label="Office floor">
+      <div class="reception-row">
+        <div class="reception-label">Client desk</div>
+        <div id="reception"></div>
+        <div class="live-control live-only">
+          <div class="runner-status" id="runnerStatus" aria-live="polite"></div>
+          <form id="liveForm" class="request-form">
+            <textarea id="liveInput" rows="2" aria-label="Message to the team"></textarea>
+            <div class="live-buttons">
+              <button class="btn primary" id="liveSend">Send</button>
+              <button type="button" class="btn danger" id="liveStop" hidden>Stop</button>
+            </div>
+          </form>
+          <p class="live-hint">You can also work in Claude chat: <code>/office &lt;your request&gt;</code>. Staff edits are saved to <code>.claude/agents/</code>.</p>
+        </div>
+        <form id="requestForm" class="request-form demo-only">
+          <input id="requestInput" placeholder="Send a new request to the team…" aria-label="New request">
+          <button class="btn primary">Send</button>
+        </form>
+      </div>
+      <div class="floor" id="floor"></div>
+      <section class="board-wrap" aria-label="Task board">
+        <h2>Task board</h2>
+        <div class="board" id="board"></div>
+      </section>
+    </section>
+
+    <aside class="sidebar">
+      <div class="side-head">
+        <h2>Activity</h2>
+        <button class="btn small demo-only" id="resetStaffBtn" title="Restore default staff">Default staff</button>
+      </div>
+      <ul class="feed" id="feed"></ul>
+    </aside>
+  </main>
+
+  <aside class="panel" id="panel" aria-label="Agent details"></aside>
+
+  <div class="modal-backdrop" id="proposal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="proposalTitle" id="proposalBody"></div>
+  </div>
+
+  <script src="js/data.js"></script>
+  <script src="js/chibi.js"></script>
+  <script src="js/staffing.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/live.js"></script>
+</body>
+</html>
