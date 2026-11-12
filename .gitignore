@@ -1,0 +1,14 @@
+# Projects built by the office team
+workspace/
+
+# Runtime office state (written by hooks, the PM and the dashboard server)
+office/events.jsonl
+office/events.jsonl.old
+office/tasks.json
+office/proposal.json
+office/active-run.json
+office/dismissed/
+
+# Local Claude settings
+.claude/settings.local.json
+office/runner-state.json

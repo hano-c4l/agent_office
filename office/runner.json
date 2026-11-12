@@ -1,0 +1,10 @@
+{
+  "claudePath": "",
+  "permissionMode": "acceptEdits",
+  "allowedTools": [
+    "Read", "Write", "Edit", "Glob", "Grep", "Agent", "Skill", "WebSearch", "WebFetch",
+    "Bash(npm *)", "Bash(npx *)", "Bash(node *)", "Bash(mkdir *)", "Bash(ls *)",
+    "Bash(cat *)", "Bash(git init*)", "Bash(git status*)", "Bash(python *)", "Bash(pip *)"
+  ],
+  "maxTurns": 200
+}
