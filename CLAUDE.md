@@ -9,7 +9,8 @@
 - Likewise, when the user says "PR into production", create a PR from `preview` into `main`, merge it, and run the deploy/migration for production if there is one.
 
 ## Agent Office runs
-- Projects built by the office team (through the `/office` skill) live in `workspace/<project>/`, which git ignores. The Git rules above are for developing Agent Office itself, not for those projects.
+- Each department (project) has its own workspace folder and git repository: anywhere on disk, or under `workspace/` here, which git ignores. The Git rules above are for developing Agent Office itself, not for those projects; each workspace has its own rules in its `CLAUDE.md`.
+- The `/office` skill, hooks and settings in `templates/workspace/` are installed into each workspace, not loaded in this repository. `templates/roles.json` is only a reference catalog: each department's PM writes its own agents and skills.
 
 ## Language
 - The user chats and gives requests in Vietnamese or English, so reply to the user in Vietnamese.

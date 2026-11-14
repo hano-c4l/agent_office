@@ -1,5 +1,6 @@
-// Claude Code hook: turns hook input into a small office event and appends it to office/events.jsonl.
-// The dashboard server streams this file to the browser. This script must never block or fail a session.
+// Claude Code hook (installed by Agent Office): turns hook input into a small office event and appends it
+// to .office/events.jsonl in this workspace. The Agent Office server streams this file to the dashboard.
+// This script must never block or fail a session.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -7,9 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR ||
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const EVENTS_FILE = path.join(ROOT, "office", "events.jsonl");
-const ACTIVE_FILE = path.join(ROOT, "office", "active-run.json");
-const AGENTS_DIR = path.join(ROOT, ".claude", "agents");
+const EVENTS_FILE = path.join(ROOT, ".office", "events.jsonl");
 const MAX_TEXT = 300;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
@@ -82,24 +81,10 @@ function toEvent(input) {
   }
 }
 
-// Log everything while an office run is active (the /office skill writes active-run.json).
-// Outside a run, only log events from office agents, so normal coding sessions in this repo stay quiet.
-function shouldLog(input) {
-  try {
-    const run = JSON.parse(fs.readFileSync(ACTIVE_FILE, "utf8"));
-    if (run && run.status === "running") return true;
-  } catch {
-    // No active run.
-  }
-  const type = input.agent_type;
-  return Boolean(type && /^[\w-]+$/.test(type) && fs.existsSync(path.join(AGENTS_DIR, `${type}.md`)));
-}
-
 function main(raw) {
   try {
     const input = JSON.parse(raw || "{}");
     if (!input.hook_event_name) return;
-    if (!shouldLog(input)) return;
     fs.mkdirSync(path.dirname(EVENTS_FILE), { recursive: true });
     // Start a fresh log when it grows too large.
     if (fs.existsSync(EVENTS_FILE) && fs.statSync(EVENTS_FILE).size > MAX_FILE_BYTES) {

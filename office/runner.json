@@ -1,10 +1,19 @@
 {
   "claudePath": "",
   "permissionMode": "acceptEdits",
+  "maxTurns": 200,
+  "maxParallelRuns": 2,
   "allowedTools": [
     "Read", "Write", "Edit", "Glob", "Grep", "Agent", "Skill", "WebSearch", "WebFetch",
-    "Bash(npm *)", "Bash(npx *)", "Bash(node *)", "Bash(mkdir *)", "Bash(ls *)",
-    "Bash(cat *)", "Bash(git init*)", "Bash(git status*)", "Bash(python *)", "Bash(pip *)"
+    "Bash(npm *)", "Bash(npx *)", "Bash(node *)", "Bash(python *)", "Bash(pip *)",
+    "Bash(mkdir *)", "Bash(ls *)", "Bash(cat *)",
+    "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git branch*)", "Bash(git remote*)",
+    "Bash(git add *)", "Bash(git commit *)", "Bash(git checkout *)", "Bash(git switch *)",
+    "Bash(git merge *)", "Bash(git fetch*)", "Bash(git pull*)",
+    "Bash(git push origin preview*)", "Bash(git push -u origin feature_*)", "Bash(git push origin feature_*)"
   ],
-  "maxTurns": 200
+  "disallowedTools": [
+    "Bash(git push origin main*)", "Bash(git push -u origin main*)", "Bash(git push --force*)", "Bash(git push -f*)",
+    "Bash(git reset --hard*)", "Bash(git branch -D*)", "Bash(git checkout main*)", "Bash(git switch main*)"
+  ]
 }
