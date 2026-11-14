@@ -1,22 +1,17 @@
-// Agent Office local server: serves the dashboard, the staff API (HR) and a live event stream.
+// Agent Office local server: serves the company dashboard, the department API (create, HR, team proposal,
+// PM runs, release) and a live event stream for all departments.
 // Usage: node server/office-server.mjs [port]   (binds to 127.0.0.1 only)
 
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import {
-  ROOT, OFFICE_DIR, AGENTS_DIR, META_FILE,
-  listStaff, saveStaff, dismissStaff, ensureAllSkills, isValidId,
-} from "./staff-store.mjs";
-import { RunController } from "./run-controller.mjs";
+import { DASHBOARD_DIR } from "./paths.mjs";
+import { isValidId, roleCatalog } from "./staff-store.mjs";
+import { listFolders, inspectFolder } from "./workspace-setup.mjs";
+import { Scheduler, runnerConfig } from "./run-controller.mjs";
+import { Company } from "./departments.mjs";
 
 const PORT = Number(process.argv[2] || process.env.PORT || 5178);
-const DASHBOARD_DIR = path.join(ROOT, "dashboard");
-const EVENTS_FILE = path.join(OFFICE_DIR, "events.jsonl");
-const TASKS_FILE = path.join(OFFICE_DIR, "tasks.json");
-const PROPOSAL_FILE = path.join(OFFICE_DIR, "proposal.json");
-const RUN_FILE = path.join(OFFICE_DIR, "active-run.json");
-const REPLAY_EVENTS = 300;
 const MAX_BODY = 1024 * 1024;
 
 const MIME = {
@@ -26,38 +21,6 @@ const MIME = {
 };
 
 // ---------- helpers ----------
-
-function readJson(file, fallback = null) {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(file, data) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
-}
-
-function readRecentEvents(limit) {
-  try {
-    const lines = fs.readFileSync(EVENTS_FILE, "utf8").split("\n").filter(Boolean);
-    return lines.slice(-limit).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function snapshot() {
-  return {
-    staff: listStaff(),
-    tasks: readJson(TASKS_FILE, { tasks: [] }),
-    proposal: readJson(PROPOSAL_FILE, null),
-    run: readJson(RUN_FILE, null),
-    runner: runner.publicState(),
-  };
-}
 
 function send(res, status, body, type = "application/json") {
   res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store" });
@@ -83,133 +46,147 @@ function readBody(req) {
 // ---------- live stream (SSE) ----------
 
 const clients = new Set();
-const runner = new RunController((type, data) => broadcast(type, data));
 
 function broadcast(type, data) {
   const payload = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
   clients.forEach((res) => res.write(payload));
 }
 
+const company = new Company({ scheduler: new Scheduler(), broadcast });
+
+function snapshot() {
+  const cfg = runnerConfig();
+  return {
+    defaults: company.defaults(),
+    maxParallelRuns: cfg.maxParallelRuns,
+    library: roleCatalog(),
+    departments: company.list().map((d) => d.snapshot()),
+  };
+}
+
 function openStream(req, res) {
   res.writeHead(200, {
     "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive",
   });
-  res.write(`event: snapshot\ndata: ${JSON.stringify({ ...snapshot(), events: readRecentEvents(REPLAY_EVENTS) })}\n\n`);
+  res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot())}\n\n`);
   clients.add(res);
   req.on("close", () => clients.delete(res));
 }
 
-// Poll files instead of fs.watch: polling behaves the same on Windows, macOS and Linux.
-let eventsOffset = fs.existsSync(EVENTS_FILE) ? fs.statSync(EVENTS_FILE).size : 0;
-let partialLine = "";
-const mtimes = {};
-
-function changed(file) {
-  let m = 0;
-  try { m = fs.statSync(file).mtimeMs; } catch { /* missing file */ }
-  if (mtimes[file] === m) return false;
-  const first = mtimes[file] === undefined;
-  mtimes[file] = m;
-  return !first;
-}
-
-function agentsChanged() {
-  let sig = "";
-  try {
-    sig = fs.readdirSync(AGENTS_DIR).map((f) => f + fs.statSync(path.join(AGENTS_DIR, f)).mtimeMs).join("|");
-  } catch { /* no agents dir */ }
-  try { sig += "|" + fs.statSync(META_FILE).mtimeMs; } catch { /* no meta */ }
-  if (mtimes.agents === sig) return false;
-  const first = mtimes.agents === undefined;
-  mtimes.agents = sig;
-  return !first;
-}
-
-function pollFiles() {
-  try {
-    const size = fs.existsSync(EVENTS_FILE) ? fs.statSync(EVENTS_FILE).size : 0;
-    if (size < eventsOffset) eventsOffset = 0; // log was rotated
-    if (size > eventsOffset) {
-      const fd = fs.openSync(EVENTS_FILE, "r");
-      const buf = Buffer.alloc(size - eventsOffset);
-      fs.readSync(fd, buf, 0, buf.length, eventsOffset);
-      fs.closeSync(fd);
-      eventsOffset = size;
-      const text = partialLine + buf.toString("utf8");
-      const lines = text.split("\n");
-      partialLine = lines.pop();
-      lines.filter(Boolean).forEach((line) => {
-        let ev;
-        try { ev = JSON.parse(line); } catch { return; }
-        // An /office run started in a chat session: remember it so the dashboard can take it over.
-        if (ev.hook === "UserPromptSubmit" && /^\/office/.test(ev.text || "")) runner.noteChatSession(ev.session);
-        broadcast("office-event", ev);
-      });
-    }
-  } catch (err) {
-    console.warn("Event poll failed:", err.message);
-  }
-  if (changed(TASKS_FILE)) broadcast("tasks", readJson(TASKS_FILE, { tasks: [] }));
-  if (changed(PROPOSAL_FILE)) broadcast("proposal", readJson(PROPOSAL_FILE, null));
-  if (changed(RUN_FILE)) broadcast("run", readJson(RUN_FILE, null));
-  if (agentsChanged()) broadcast("staff", listStaff());
-}
-
 // ---------- routes ----------
 
-async function handleApi(req, res, url) {
-  const [, , resource, id] = url.pathname.split("/");
+async function handleDepartment(req, res, dept, parts) {
+  const [section, sub] = parts;
 
-  if (resource === "stream" && req.method === "GET") return openStream(req, res);
-  if (resource === "state" && req.method === "GET") return send(res, 200, snapshot());
+  if (!section && req.method === "DELETE") return send(res, 200, { ok: company.remove(dept.id) });
+  if (!section && req.method === "GET") return send(res, 200, dept.snapshot());
 
-  if (resource === "staff") {
-    if (req.method === "GET" && !id) return send(res, 200, listStaff());
-    if (!isValidId(id)) return send(res, 400, { error: "Invalid agent id" });
+  // Hire by hand: creates the agent only now, when the customer confirms the form.
+  if (section === "staff" && !sub && req.method === "POST") {
+    const body = await readBody(req);
+    if (!isValidId(body.id)) return send(res, 400, { error: "Agent id must use lowercase letters, digits, _ or -." });
+    if (dept.store.has(body.id) || dept.store.get(body.id)) return send(res, 409, { error: `An agent with id "${body.id}" already exists.` });
+    return send(res, 200, dept.store.save(body));
+  }
+
+  // Hire with the PM: the PM designs the role and answers with a hire proposal.
+  if (section === "hire" && req.method === "POST") {
+    const body = await readBody(req);
+    return send(res, 200, { ...dept.requestHire(body.description, body.model), ...dept.runner.publicState() });
+  }
+
+  if (section === "staff") {
+    if (!isValidId(sub)) return send(res, 400, { error: "Invalid agent id" });
+    const action = parts[2];
+    if (req.method === "POST" && action === "randomize") {
+      const agent = dept.store.randomize(sub);
+      return agent ? send(res, 200, agent) : send(res, 404, { error: "Not found" });
+    }
+    if (req.method === "POST" && action === "helper") {
+      const body = await readBody(req);
+      dept.store.setHelper(sub, Boolean(body.helper));
+      return send(res, 200, { staff: dept.store.list(), helpers: dept.store.helpers() });
+    }
     if (req.method === "PUT") {
       const body = await readBody(req);
-      return send(res, 200, saveStaff({ ...body, id }));
+      return send(res, 200, dept.store.save({ ...body, id: sub }));
     }
     if (req.method === "DELETE") {
-      return dismissStaff(id) ? send(res, 200, { ok: true }) : send(res, 404, { error: "Not found" });
+      if (sub === "pm") return send(res, 400, { error: "The PM leads the department and cannot be dismissed." });
+      return dept.store.dismiss(sub) ? send(res, 200, { ok: true }) : send(res, 404, { error: "Not found" });
     }
   }
 
-  if (resource === "proposal") {
-    if (req.method === "GET") return send(res, 200, readJson(PROPOSAL_FILE, null));
-    if (req.method === "PUT") {
-      const current = readJson(PROPOSAL_FILE, null);
-      if (!current) return send(res, 404, { error: "No proposal" });
-      const body = await readBody(req);
-      const next = { ...current, members: body.members || current.members, status: body.status || current.status };
-      if (next.status === "approved") {
-        next.approvedAt = new Date().toISOString();
-        // Hire roles that do not have an agent file yet.
-        const existing = new Set(listStaff().map((a) => a.id));
-        next.members.filter((m) => m.included !== false && !existing.has(m.id) && isValidId(m.id))
-          .forEach((m) => saveStaff(m));
-      }
-      writeJson(PROPOSAL_FILE, next);
-      // For a run driven by the dashboard, tell the PM right away.
-      if (next.status === "approved" && body.status === "approved" && runner.state.origin === "dashboard") {
-        runner.reply("I approved the team on the dashboard (office/proposal.json). Please continue with the plan.");
-      }
-      return send(res, 200, next);
-    }
+  if (section === "proposal" && req.method === "PUT") {
+    return send(res, 200, dept.updateProposal(await readBody(req)));
   }
 
-  if (resource === "run" && req.method === "POST") {
+  if (section === "run" && req.method === "POST") {
     const body = await readBody(req);
-    try {
-      if (id === "start") { runner.start(body.request); return send(res, 200, runner.publicState()); }
-      if (id === "reply") return send(res, 200, { ...runner.reply(body.text, { takeover: Boolean(body.takeover) }), ...runner.publicState() });
-      if (id === "stop") { runner.stop(); return send(res, 200, runner.publicState()); }
-    } catch (err) {
-      return send(res, 409, { error: err.message, code: err.code });
-    }
+    const runner = dept.runner;
+    if (sub === "start") { runner.start(body.request); return send(res, 200, runner.publicState()); }
+    if (sub === "reply") return send(res, 200, { ...runner.reply(body.text, { takeover: Boolean(body.takeover) }), ...runner.publicState() });
+    if (sub === "stop") { runner.stop(); return send(res, 200, runner.publicState()); }
+  }
+
+  if (section === "room" && sub === "randomize" && req.method === "POST") {
+    const info = dept.randomizeRoom();
+    company.save();
+    broadcast("department-info", { dept: dept.id, data: info });
+    return send(res, 200, info);
+  }
+
+  if (section === "migration" && sub === "confirm" && req.method === "POST") {
+    const result = await dept.confirmMigration();
+    company.save();
+    broadcast("department-info", { dept: dept.id, data: dept.info });
+    return send(res, 200, result);
+  }
+
+  if (section === "release" && req.method === "POST") {
+    const result = await dept.release();
+    company.save();
+    broadcast("department-info", { dept: dept.id, data: dept.info });
+    return send(res, 200, result);
   }
 
   return send(res, 404, { error: "Unknown API route" });
+}
+
+async function handleApi(req, res, url) {
+  const parts = url.pathname.split("/").slice(2).map(decodeURIComponent);
+  const [resource, id, ...rest] = parts;
+  try {
+    if (resource === "stream" && req.method === "GET") return openStream(req, res);
+    if (resource === "state" && req.method === "GET") return send(res, 200, snapshot());
+
+    // Folder picker: lists sub-folders and describes a folder (local machine only, the server binds to 127.0.0.1).
+    if (resource === "fs" && req.method === "GET") {
+      const target = url.searchParams.get("path") || "";
+      if (id === "list") return send(res, 200, listFolders(target));
+      if (id === "inspect") return send(res, 200, await inspectFolder(target));
+    }
+
+    if (resource === "departments") {
+      if (!id) {
+        if (req.method === "GET") return send(res, 200, snapshot().departments);
+        if (req.method === "POST") {
+          const body = await readBody(req);
+          const dept = await company.create(body);
+          // A migrated project starts with onboarding even without a request; a new one waits for a request.
+          const prompt = company.firstPrompt(dept, body.request);
+          if (prompt) dept.runner.start(prompt);
+          return send(res, 200, dept.snapshot({ withEvents: false }));
+        }
+      }
+      const dept = company.get(id);
+      if (!dept) return send(res, 404, { error: "Department not found" });
+      return await handleDepartment(req, res, dept, rest);
+    }
+    return send(res, 404, { error: "Unknown API route" });
+  } catch (err) {
+    return send(res, err.status || (err.code === "CHAT_OWNED" ? 409 : 400), { error: err.message, code: err.code });
+  }
 }
 
 function serveStatic(req, res, url) {
@@ -234,11 +211,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-ensureAllSkills();
-pollFiles();
-setInterval(pollFiles, 500);
+setInterval(() => company.pollAll(), 500);
 setInterval(() => clients.forEach((res) => res.write(": ping\n\n")), 20000);
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Agent Office dashboard: http://localhost:${PORT}`);
+  console.log(`Agent Office dashboard: http://localhost:${PORT} (${company.list().length} departments)`);
 });

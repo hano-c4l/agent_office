@@ -5,75 +5,241 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agent Office</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;800&family=Pixelify+Sans:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="logo">🏢</span> Agent Office <span class="mode-badge live-only">LIVE</span><span class="mode-badge demo demo-only">DEMO</span></div>
-    <div class="project">
-      <div class="req">Request: <b id="requestText"></b></div>
-      <div class="project-progress"><div class="bar"><i id="projectBar"></i></div><b id="projectPct">0%</b></div>
-    </div>
-    <div class="controls demo-only">
-      <button class="btn primary" id="playBtn">Start</button>
-      <button class="btn" id="stepBtn" title="Run one step">Step</button>
-      <button class="btn" id="resetBtn">Reset</button>
-      <label class="speed">Speed
-        <select id="speedSel"><option value="1">1x</option><option value="2">2x</option><option value="4">4x</option></select>
-      </label>
-    </div>
+    <div class="brand"><span class="logo">🏢</span> Agent Office
+      <span class="mode-badge live-only">LIVE</span><span class="mode-badge demo demo-only">DEMO</span></div>
+    <div class="company-stats" id="companyStats"></div>
+    <button class="btn primary" id="newDeptBtn">+ Department</button>
   </header>
 
-  <div class="wait-banner" id="waitBanner" hidden>✋ <span id="waitText"></span></div>
+  <!-- Company floor: every department is a room -->
+  <main id="floorView" class="floor-view">
+    <div class="floor-head">
+      <h1>Company floor</h1>
+      <p class="muted">Each department is one project with its own team, workspace and repository. Click a room to walk in.</p>
+    </div>
+    <p class="floor-empty" id="floorEmpty" hidden>No departments yet. Create one to start your first project.</p>
+    <div class="floor-grid" id="floorGrid">
+      <button class="room-card new-room" id="newDeptTile" aria-label="Create a new department">
+        <div class="room mini empty-room"><svg class="room-svg" viewBox="0 0 260 156" aria-hidden="true"></svg>
+          <span class="new-room-label"><span class="plus">+</span>New department</span></div>
+      </button>
+    </div>
+  </main>
 
-  <main class="layout">
-    <section class="office" aria-label="Office floor">
-      <div class="reception-row">
-        <div class="reception-label">Client desk</div>
-        <div id="reception"></div>
-        <div class="live-control live-only">
+  <!-- One department -->
+  <main id="roomView" class="room-view" hidden>
+    <div class="room-head">
+      <button class="btn" id="backBtn">← Company floor</button>
+      <div class="room-title">
+        <h1 id="roomName"></h1>
+        <p class="room-meta" id="roomMeta"></p>
+      </div>
+      <div class="room-progress"><div class="bar"><i id="roomBar"></i></div><b id="roomPct">0%</b></div>
+      <div class="room-actions">
+        <button class="btn" id="hireBtn">+ Hire staff</button>
+        <button class="btn" id="releaseBtn" title="Merge preview into main and push">Release to main</button>
+        <button class="btn danger" id="removeDeptBtn" title="Close the department on the dashboard (its folder and repository are kept)">Close department</button>
+      </div>
+    </div>
+    <p class="setup-warn" id="setupWarn" hidden></p>
+    <div class="migration-banner" id="migrationBanner" hidden>
+      <span id="migrationText"></span>
+      <button class="btn small primary" id="confirmMigrationBtn">Confirm migration</button>
+    </div>
+    <div class="helpers-strip" id="helpersStrip" hidden></div>
+
+    <div class="room-layout">
+      <div class="room-main">
+        <div class="room big" id="roomStage"></div>
+        <section class="board-wrap" aria-label="Task board">
+          <div class="board-head">
+            <h2>Task board</h2>
+            <div class="board-filters">
+              <input type="search" id="taskSearch" placeholder="Search tasks" aria-label="Search tasks">
+              <select id="taskOwner" aria-label="Filter by owner"></select>
+              <span class="muted" id="taskCount"></span>
+            </div>
+          </div>
+          <div class="board" id="board"></div>
+        </section>
+      </div>
+
+      <aside class="sidebar">
+        <section class="client-desk" aria-label="Client desk">
+          <h2>Client desk</h2>
+          <p class="room-request" id="roomRequest" hidden></p>
+          <div class="need-banner" id="needBanner" hidden>✋ <span id="needText"></span>
+            <button class="btn small" id="reviewTeamBtn" hidden>Review team</button></div>
           <div class="runner-status" id="runnerStatus" aria-live="polite"></div>
           <form id="liveForm" class="request-form">
-            <textarea id="liveInput" rows="2" aria-label="Message to the team"></textarea>
+            <textarea id="liveInput" rows="3" aria-label="Message to the PM"></textarea>
             <div class="live-buttons">
               <button class="btn primary" id="liveSend">Send</button>
               <button type="button" class="btn danger" id="liveStop" hidden>Stop</button>
             </div>
           </form>
-          <p class="live-hint">You can also work in Claude chat: <code>/office &lt;your request&gt;</code>. Staff edits are saved to <code>.claude/agents/</code>.</p>
+          <p class="live-hint">Ctrl+Enter to send. You can also talk to the PM in Claude: open the workspace and run <code>/office &lt;request&gt;</code>.</p>
+        </section>
+        <div class="feed-tabs" role="tablist" aria-label="Messages and activity">
+          <button type="button" role="tab" data-feed-tab="messages" class="active" aria-selected="true">Messages <span class="tab-badge" id="msgBadge" hidden></span></button>
+          <button type="button" role="tab" data-feed-tab="activity" aria-selected="false">Activity</button>
         </div>
-        <form id="requestForm" class="request-form demo-only">
-          <input id="requestInput" placeholder="Send a new request to the team…" aria-label="New request">
-          <button class="btn primary">Send</button>
-        </form>
-      </div>
-      <div class="floor" id="floor"></div>
-      <section class="board-wrap" aria-label="Task board">
-        <h2>Task board</h2>
-        <div class="board" id="board"></div>
-      </section>
-    </section>
-
-    <aside class="sidebar">
-      <div class="side-head">
-        <h2>Activity</h2>
-        <button class="btn small demo-only" id="resetStaffBtn" title="Restore default staff">Default staff</button>
-      </div>
-      <ul class="feed" id="feed"></ul>
-    </aside>
+        <ul class="feed messages" id="messages" aria-label="Messages between you and the PM"></ul>
+        <ul class="feed" id="feed" aria-label="Team activity" hidden></ul>
+      </aside>
+    </div>
   </main>
 
-  <aside class="panel" id="panel" aria-label="Agent details"></aside>
+  <aside class="panel" id="panel" aria-label="Staff details"></aside>
 
   <div class="modal-backdrop" id="proposal" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="proposalTitle" id="proposalBody"></div>
   </div>
 
+  <div class="modal-backdrop" id="createModal" hidden>
+    <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="createTitle">
+      <header class="modal-head">
+        <div>
+          <h2 id="createTitle">Department</h2>
+          <p class="muted" id="modeHelp"></p>
+        </div>
+        <button class="icon-btn" id="createClose" aria-label="Close">×</button>
+      </header>
+      <div class="mode-tabs" role="tablist" aria-label="How to add the department">
+        <button type="button" role="tab" data-mode="new">New project</button>
+        <button type="button" role="tab" data-mode="open">Open department</button>
+        <button type="button" role="tab" data-mode="migrate">Migrate project</button>
+      </div>
+      <form id="createForm" class="create-form">
+        <label data-modes="new migrate">Department name<input name="name" maxlength="60" placeholder="e.g. Coffee Shop Website" autocomplete="off"></label>
+        <label data-modes="new open migrate"><span id="folderLabel">Workspace folder</span>
+          <span class="path-row"><input name="workspace" placeholder="Absolute path" autocomplete="off" spellcheck="false">
+            <button type="button" class="btn small" id="browseBtn">Browse…</button></span>
+          <span class="field-hint" id="folderHint"></span></label>
+        <label data-modes="migrate">Documentation folders<input name="docFolders" value="docs" placeholder="docs, design/specs" autocomplete="off" spellcheck="false">
+          <span class="field-hint" id="docsHint">Comma-separated folders the team reads first to understand the project. Missing folders are skipped.</span></label>
+        <fieldset class="agent-pick" data-modes="migrate" id="agentPick" hidden>
+          <legend>Existing Claude agents in this project</legend>
+          <p class="field-hint">Tick the ones that join the staff and take tasks. The others become assistants:
+            utilities such as web search or code search that the team can call, without tasks of their own.</p>
+          <div id="agentPickList"></div>
+        </fieldset>
+        <label data-modes="new migrate">PM model
+          <select name="pmModel">
+            <option value="opus">opus (best planning)</option>
+            <option value="sonnet">sonnet (balanced)</option>
+            <option value="haiku">haiku (fast, simple projects)</option>
+          </select></label>
+        <label data-modes="new migrate">Git repository (optional)<input name="repo" placeholder="https://github.com/you/repo.git" autocomplete="off">
+          <span class="field-hint" id="repoHint">An empty repository. main and preview are created and pushed with your git credentials.</span></label>
+        <label data-modes="new migrate">First request (optional)<textarea name="request" rows="3" placeholder="What should this department build?"></textarea></label>
+        <p class="form-error" id="createError" role="alert" hidden></p>
+        <footer class="modal-foot">
+          <button type="button" class="btn" id="createCancel">Cancel</button>
+          <button type="submit" class="btn primary" id="createBtn">Create</button>
+        </footer>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="hireModal" hidden>
+    <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="hireTitle">
+      <header class="modal-head">
+        <div>
+          <h2 id="hireTitle">Hire staff</h2>
+          <p class="muted" id="hireHelp"></p>
+        </div>
+        <button class="icon-btn" id="hireClose" aria-label="Close">×</button>
+      </header>
+      <div class="mode-tabs" role="tablist" aria-label="How to hire">
+        <button type="button" role="tab" data-hire-mode="auto">Auto (PM designs it)</button>
+        <button type="button" role="tab" data-hire-mode="manual">Manual</button>
+      </div>
+
+      <form id="hireAuto" class="create-form">
+        <label>Who do you need?<textarea name="description" rows="4" required
+          placeholder="e.g. Someone who writes end-to-end tests with Playwright and keeps the CI green"></textarea></label>
+        <label>Model
+          <select name="model">
+            <option value="auto">Let the PM choose</option>
+            <option value="opus">opus</option>
+            <option value="sonnet">sonnet</option>
+            <option value="haiku">haiku</option>
+          </select></label>
+        <p class="form-error" id="hireAutoError" role="alert" hidden></p>
+        <footer class="modal-foot">
+          <button type="button" class="btn" data-hire-cancel>Cancel</button>
+          <button type="submit" class="btn primary" id="hireAutoBtn">Ask the PM</button>
+        </footer>
+      </form>
+
+      <form id="hireManual" class="create-form" hidden>
+        <div class="grid2">
+          <label>Job title<input name="title" required placeholder="e.g. Mobile Developer" autocomplete="off"></label>
+          <label>Staff id<input name="agentId" required pattern="[a-z0-9][a-z0-9_\-]{0,62}" placeholder="mobile_dev" autocomplete="off" spellcheck="false"></label>
+          <label>Name<input name="name" placeholder="Random if empty" autocomplete="off"></label>
+          <label>Role<select name="role" id="hireRole"></select></label>
+          <label>Model<select name="model">
+            <option value="sonnet">sonnet</option><option value="opus">opus</option><option value="haiku">haiku</option></select></label>
+          <label>Skills<input name="skills" placeholder="react-native, push-notifications" autocomplete="off"></label>
+        </div>
+        <label>Description (when the PM should give this person work)<input name="description" placeholder="Builds the mobile app screens" autocomplete="off"></label>
+        <fieldset>
+          <legend>Functions / tools</legend>
+          <div class="tool-grid" id="hireTools"></div>
+        </fieldset>
+        <label>Responsibilities (system prompt)<textarea name="prompt" rows="4" required
+          placeholder="What this person does, how they work and what they deliver."></textarea></label>
+        <p class="form-error" id="hireManualError" role="alert" hidden></p>
+        <footer class="modal-foot">
+          <button type="button" class="btn" data-hire-cancel>Cancel</button>
+          <button type="submit" class="btn primary" id="hireManualBtn">Hire</button>
+        </footer>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="folderModal" hidden>
+    <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="folderTitle">
+      <header class="modal-head">
+        <div><h2 id="folderTitle">Choose a folder</h2></div>
+        <button class="icon-btn" id="folderClose" aria-label="Close">×</button>
+      </header>
+      <form class="path-row folder-go" id="folderGo">
+        <button type="button" class="btn small" id="folderUp" title="Parent folder" aria-label="Parent folder">↑</button>
+        <input id="folderPath" aria-label="Folder path" spellcheck="false" autocomplete="off">
+        <button class="btn small">Go</button>
+      </form>
+      <div class="folder-shortcuts">
+        <button type="button" class="btn small" data-jump="">Drives</button>
+        <button type="button" class="btn small" data-jump="home">Home</button>
+        <button type="button" class="btn small" data-jump="workspace">Agent Office workspace</button>
+      </div>
+      <ul class="folder-list" id="folderList" aria-label="Folders"></ul>
+      <p class="form-error" id="folderError" hidden></p>
+      <div class="new-folder" id="newFolderRow">
+        <label>New folder here<input id="newFolderName" placeholder="folder-name" autocomplete="off" spellcheck="false"></label>
+        <button type="button" class="btn small" id="useNewFolder">Use new folder</button>
+      </div>
+      <footer class="modal-foot">
+        <span class="muted folder-current" id="folderCurrent"></span>
+        <button type="button" class="btn" id="folderCancel">Cancel</button>
+        <button type="button" class="btn primary" id="useFolder">Use this folder</button>
+      </footer>
+    </div>
+  </div>
+
   <script src="js/data.js"></script>
-  <script src="js/chibi.js"></script>
-  <script src="js/staffing.js"></script>
+  <script src="js/pixel.js"></script>
   <script src="js/app.js"></script>
-  <script src="js/live.js"></script>
+  <script>
+    // Draw the empty room on the "new department" tile.
+    document.querySelector("#newDeptTile .room-svg").outerHTML = emptyRoomSvg();
+  </script>
 </body>
 </html>
