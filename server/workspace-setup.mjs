@@ -85,21 +85,25 @@ function mergeSettings(file, templateFile) {
   }
   const hooks = current.hooks || {};
   for (const [event, entries] of Object.entries(template.hooks)) {
-    const list = Array.isArray(hooks[event]) ? hooks[event] : [];
-    const hasOffice = list.some((e) => JSON.stringify(e).includes("office-event.mjs"));
-    hooks[event] = hasOffice ? list : [...list, ...entries];
+    // The project's own hooks stay; office entries are replaced so an update can change them.
+    const own = (Array.isArray(hooks[event]) ? hooks[event] : []).filter((e) => !JSON.stringify(e).includes("office-event.mjs"));
+    hooks[event] = [...own, ...entries];
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ ...current, hooks }, null, 2) + "\n");
 }
 
-// Writes the office section of CLAUDE.md, keeping anything the project already has.
-function writeClaudeMd(root, department) {
-  const file = path.join(root, "CLAUDE.md");
-  const section = fs.readFileSync(path.join(TEMPLATE_WORKSPACE_DIR, "CLAUDE.md"), "utf8")
+function claudeMdSection(department) {
+  return fs.readFileSync(path.join(TEMPLATE_WORKSPACE_DIR, "CLAUDE.md"), "utf8")
     .replace(/\{\{DEPARTMENT\}\}/g, department.name)
     .replace(/\{\{REMOTE_NOTE\}\}/g, department.repo ? ` (remote: ${department.repo})` : "")
     .trim();
+}
+
+// Writes the office section of CLAUDE.md, keeping anything the project already has.
+function writeClaudeMd(root, department) {
+  const file = path.join(root, "CLAUDE.md");
+  const section = claudeMdSection(department);
   if (!fs.existsSync(file)) {
     fs.writeFileSync(file, section + "\n");
     return;
@@ -121,14 +125,75 @@ function ensureGitignore(root) {
   fs.writeFileSync(file, `${text}${prefix}# Agent Office live state\n.office/\n`);
 }
 
-// Installs the office infrastructure. Agents and skills are written later by the PM.
-export function installOfficeFiles(root, department) {
-  fs.mkdirSync(root, { recursive: true });
+// The files Agent Office owns in a workspace: hooks, the /office skill, the hook settings and the CLAUDE.md section.
+function copyOfficeFiles(root, department) {
   copyDir(path.join(TEMPLATE_WORKSPACE_DIR, ".claude", "hooks"), path.join(root, ".claude", "hooks"));
   copyDir(path.join(TEMPLATE_WORKSPACE_DIR, ".claude", "skills"), path.join(root, ".claude", "skills"));
   mergeSettings(path.join(root, ".claude", "settings.json"), path.join(TEMPLATE_WORKSPACE_DIR, ".claude", "settings.json"));
   writeClaudeMd(root, department);
   ensureGitignore(root);
+}
+
+function templateFiles(dir, base = dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    return entry.isDirectory() ? templateFiles(full, base) : [path.relative(base, full)];
+  });
+}
+
+const normalize = (text) => text.replace(/\r\n/g, "\n").trim();
+
+// True when the workspace still has office files from an older Agent Office version.
+export function officeFilesOutdated(root, department) {
+  try {
+    for (const part of ["hooks", "skills"]) {
+      const src = path.join(TEMPLATE_WORKSPACE_DIR, ".claude", part);
+      for (const rel of templateFiles(src)) {
+        const installed = path.join(root, ".claude", part, rel);
+        if (!fs.existsSync(installed)) return true;
+        if (normalize(fs.readFileSync(installed, "utf8")) !== normalize(fs.readFileSync(path.join(src, rel), "utf8"))) return true;
+      }
+    }
+    const claudeMd = path.join(root, "CLAUDE.md");
+    if (!fs.existsSync(claudeMd)) return true;
+    return !normalize(fs.readFileSync(claudeMd, "utf8")).includes(normalize(claudeMdSection(department)));
+  } catch {
+    return false;
+  }
+}
+
+const OFFICE_PATHS = ["CLAUDE.md", ".gitignore", ".claude/hooks", ".claude/skills/office", ".claude/settings.json"];
+
+// Brings the office files of an existing department up to this Agent Office version and commits only
+// those files on the current branch, so they reach preview with the team's normal flow.
+export async function updateOfficeFiles(root, department) {
+  if (!fs.existsSync(root)) throw new Error("The workspace folder is missing.");
+  const log = [];
+  const warnings = [];
+  copyOfficeFiles(root, department);
+  writeDepartmentFile(root, department);
+  log.push("Updated the office files (hooks, /office skill, settings, CLAUDE.md section).");
+  if (!fs.existsSync(path.join(root, ".git"))) return { log, warnings };
+  const changed = (await git(root, ["status", "--porcelain", "--", ...OFFICE_PATHS])).out;
+  if (!changed) {
+    log.push("Nothing to commit: the repository already had these files.");
+    return { log, warnings };
+  }
+  const branch = await currentBranch(root);
+  if (!branch || branch === "main") {
+    warnings.push(`The update is not committed because the workspace is on ${branch || "a detached HEAD"}. Ask the PM to commit it on a feature branch.`);
+    return { log, warnings };
+  }
+  await git(root, ["add", "--", ...OFFICE_PATHS]);
+  await git(root, ["commit", "-q", "-m", "Update Agent Office files", "--", ...OFFICE_PATHS]);
+  log.push(`Committed the update on ${branch}.`);
+  return { log, warnings };
+}
+
+// Installs the office infrastructure. Agents and skills are written later by the PM.
+export function installOfficeFiles(root, department) {
+  fs.mkdirSync(root, { recursive: true });
+  copyOfficeFiles(root, department);
   writeDepartmentFile(root, department);
   // The PM joins with a random name and the model the customer chose; the PM writes its own agent file.
   const store = new StaffStore(root);
@@ -362,6 +427,15 @@ export function listFolders(dir) {
   };
 }
 
+// Broken links and folders without access count as "not a folder" instead of failing the whole listing.
+function isDirectory(file) {
+  try {
+    return fs.statSync(file).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 // Describes a folder so the dashboard can suggest New, Open or Migrate.
 export async function inspectFolder(dir) {
   const abs = path.resolve(dir);
@@ -384,7 +458,7 @@ export async function inspectFolder(dir) {
   return {
     path: abs, exists: true, empty: visible.length === 0, hasOffice, department, isGit, origin, branch, dirty,
     agents: hasOffice ? [] : listAgentFiles(abs),
-    folders: names.filter((n) => !n.startsWith(".") && fs.statSync(path.join(abs, n)).isDirectory()).slice(0, 200),
+    folders: names.filter((n) => !n.startsWith(".") && isDirectory(path.join(abs, n))).slice(0, 200),
     hasReadme: names.some((n) => /^readme/i.test(n)), suggest, name: path.basename(abs),
   };
 }

@@ -230,14 +230,11 @@ export class StaffStore {
   setHelper(id, helper) {
     if (!isValidId(id)) throw new Error(`Invalid agent id: ${id}`);
     const meta = this.readMeta();
-    if (helper) {
-      meta[id] = { helper: true };
-      this.writeMeta(meta);
-    } else {
-      delete meta[id];
-      this.writeMeta(meta);
-      this.ensureIdentity(id);
-    }
+    // The name and look are kept, so a person who comes back to the staff is the same person.
+    const { helper: _wasHelper, ...identity } = meta[id] || {};
+    meta[id] = helper ? { ...identity, helper: true } : identity;
+    this.writeMeta(meta);
+    if (!helper) this.ensureIdentity(id);
   }
 
   // Gives a staff member a new random name and look (title and role stay).
