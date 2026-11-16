@@ -5,6 +5,9 @@ A virtual software company made of Claude Code agents. Every **department** is o
 workspace folder, git repository and team. A pixel-art dashboard shows the whole company floor, lets you walk
 into each department's room, talk to its PM and manage the staff like HR.
 
+For the current state of the project (what works, what was tested, known limits, next steps) see
+[docs/status.md](docs/status.md).
+
 ## How it fits together
 
 | Part | Where |
@@ -26,6 +29,17 @@ Inside a department workspace:
 | Staff names and looks (random, set by the dashboard) | `.office/staff.json` |
 | Live state (tasks, team proposal, run) | `.office/` (ignored by git) |
 | Team rules (language, git flow) | the Agent Office section of `CLAUDE.md` |
+
+Server modules:
+
+| Module | Job |
+|---|---|
+| `server/office-server.mjs` | HTTP server: static dashboard, REST API, SSE stream, folder picker API |
+| `server/departments.mjs` | Department registry, file polling, team and hire proposals, migration confirm, release |
+| `server/workspace-setup.mjs` | New, open and migrate setup, git branches and remote, office files, folder listing |
+| `server/run-controller.mjs` | Runs the PM through the Claude CLI, queues messages, limits parallel runs, auto-reload |
+| `server/staff-store.mjs` | Agent files and staff display data, assistants, installing staged agents and skills |
+| `server/people.mjs` | Random names and looks |
 
 The Agent Office repository itself has no agents or hooks, so working on Agent Office is never logged as office activity.
 
@@ -74,29 +88,37 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
 
 ## Dashboard
 
-- **Company floor**: every department is a room with its staff at their desks. Badges show who needs you.
+### Company floor
+- Every department is a room with its staff at their desks. Badges and the top bar show who needs you.
+- **+ Department** adds a department (see Run). **Close department** takes one off the dashboard; its folder and
+  repository stay on disk, so you can open it again.
+
+### Room
 - **Room look**: generated from a seed: desk layout (rows, cubicles, facing pods, long bench), manager corner on the
   left or right, lounge (meeting table, sofa and TV, ping-pong, round table), desk and chair models, wall decoration,
   floor items (vending machine, aquarium, arcade, printer, beanbags...) and one of eight color palettes.
   **🎲 Room** (top left of the room) picks a new look.
-- **Characters**: random gender, hair style, headwear, eyewear, eyes, mouth, outfit and face details, plus role
-  accessories. **🎲** next to the avatar in the details panel gives a new random name and look.
-- **Make assistant** in Details moves a staff member to the assistants (helper agents that get no tasks).
-- **+ Hire staff** opens a dialog; nobody joins until you confirm.
-  - **Auto**: describe who you need; the PM designs the role and sends a hire proposal. Press **Hire** to approve, then
-    the PM writes the agent file and skills (shown as a setup task on the board).
-  - **Manual**: fill in the profile yourself; the agent is created when you press **Hire**.
-- Setup work by the PM (writing the PM agent, creating the team, writing skills) shows on the task board as `S` tasks.
-- **Messages / Activity**: Messages holds what you read or answer (your messages, the PM's replies, approvals,
-  errors) with "Needs your reply" on the PM's open question; Activity holds the team's work (tools, delegation, reports).
-- **Room**: click a character for progress, tasks (open first, finished ones collapsed), recent activity and files.
-  **Details** edits the employee; skills shown dashed do not exist yet and the PM writes them on its next turn.
-  **Dismiss** moves the agent file to `.office/dismissed/`.
-- **Task board**: search, filter by owner, scrolling columns; Done shows the latest five until you expand it.
-- Character states: typing (working), thought bubble (reading/thinking), speech bubble (delegating),
+- **Character states**: typing (working), thought bubble (reading/thinking), speech bubble (delegating),
   raised hand with **!** (needs your answer), mug with steam (idle), check mark (project delivered),
-  faded with "joining" (approved, agent file not written yet).
-- **Close department** takes it off the dashboard; its folder and repository stay on disk, so you can open it again.
+  faded with "joining" (approved, profile not written yet).
+- **Client desk**: send a request or reply to the PM. **Messages** holds what you read or answer (your messages, the
+  PM's replies, approvals, errors) with "Needs your reply" on the PM's open question; **Activity** holds the team's
+  work (tools, delegation, reports).
+- **Task board**: search, filter by owner, scrolling columns; Done shows the latest five until you expand it.
+  Setup work by the PM (writing the PM profile, creating the team, writing skills) shows as `S` tasks.
+- **Release to main** merges `preview` into `main`; **Confirm migration** appears while a migrated project waits.
+
+### Staff (HR)
+- Click a character for progress, tasks (open first, finished ones collapsed), recent activity and files.
+- **🎲** next to the avatar gives a new random name and look. Characters have a random gender, hair style, headwear,
+  eyewear, eyes, mouth, outfit and face details, plus a role accessory.
+- **Details** edits the profile (name, title, role, model, description, skills, tools, responsibilities). Skills shown
+  dashed do not exist yet; the PM writes them on its next turn. **Make assistant** moves the person to the assistants
+  (helper agents that get no tasks); **Dismiss** moves the profile to `.office/dismissed/`.
+- **+ Hire staff**: nobody joins until you confirm.
+  - **Auto**: describe who you need; the PM designs the role and sends a hire proposal. Press **Hire** to approve,
+    then the PM writes the profile and skills.
+  - **Manual**: fill in the profile yourself; the person joins when you press **Hire**.
 
 ## Claude CLI for dashboard runs
 
