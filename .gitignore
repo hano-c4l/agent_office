@@ -1,0 +1,17 @@
+# Default folder for department workspaces (each one is its own git repository)
+workspace/
+
+# Departments registered on this machine (local paths and repository links)
+office/departments.json
+
+# Old single-project runtime files
+office/events.jsonl
+office/events.jsonl.old
+office/tasks.json
+office/proposal.json
+office/active-run.json
+office/dismissed/
+office/runner-state.json
+
+# Local Claude settings
+.claude/settings.local.json
