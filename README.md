@@ -40,6 +40,10 @@ Server modules:
 | `server/run-controller.mjs` | Runs the PM through the Claude CLI, queues messages, limits parallel runs, auto-reload |
 | `server/staff-store.mjs` | Agent files and staff display data, assistants, installing staged agents and skills |
 | `server/people.mjs` | Random names and looks |
+| `server/http-guard.mjs` | Refuses API requests that do not come from the dashboard (other sites, rebound host names) |
+
+Dashboard scripts: `dashboard/js/pixel.js` draws rooms and characters, `scenes.js` plays the scenes in the open room
+(break walks, tasks flying between desks, confetti) and `app.js` holds the state, the API calls and the rest of the UI.
 
 The Agent Office repository itself has no agents or hooks, so working on Agent Office is never logged as office activity.
 
@@ -58,6 +62,8 @@ agents it ends the turn with `[[office:reload]]`; the dashboard then starts the 
    ```bash
    node server/office-server.mjs
    ```
+
+   `npm start` does the same; `npm test` runs the server tests (they need git and work in temporary folders).
 
    Open http://localhost:5178. The badge shows **LIVE** when the server is connected.
 
@@ -94,19 +100,35 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
   repository stay on disk, so you can open it again.
 
 ### Room
-- **Room look**: generated from a seed: desk layout (rows, cubicles, facing pods, long bench), manager corner on the
-  left or right, lounge (meeting table, sofa and TV, ping-pong, round table), desk and chair models, wall decoration,
-  floor items (vending machine, aquarium, arcade, printer, beanbags...) and one of eight color palettes.
-  **🎲 Room** (top left of the room) picks a new look.
-- **Character states**: typing (working), thought bubble (reading/thinking), speech bubble (delegating),
-  raised hand with **!** (needs your answer), mug with steam (idle), check mark (project delivered),
-  faded with "joining" (approved, profile not written yet).
+- **Room look**: generated from a seed: desk layout (rows, cubicles, facing pods, long bench, staggered rows, shared
+  desks for two), manager corner on the left or right, lounge (meeting table, sofa and TV, ping-pong, round table,
+  kitchen, reading corner, indoor garden), desk and chair models, wall decoration (whiteboard, kanban board, screen,
+  pictures, calendar, air conditioner...), floor items (vending machine, aquarium, arcade, printer, server rack, the
+  office cat...) and one of eight color palettes. **🎲 Room** (top left of the room) picks a new look.
+  The windows show the real time of day (day, sunset, night), and the furniture moves: fish swim, screens update, the
+  coffee machine steams, the cat flicks its tail.
+- **Character states**, each a small scene:
+  - **Working**: fast typing, a glowing screen and sparks off the keyboard.
+  - **Thinking**: thought bubble, a slow sway and now and then a light bulb.
+  - **Talking** (delegating): moving mouth and a speech bubble; the task flies as a note to the person who gets it,
+    and their report flies back to the PM.
+  - **Needs you**: raised, waving hand with **!**.
+  - **Idle**: everybody has a habit: coffee, a nap, music or the phone. Now and then somebody leaves the desk for the
+    coffee machine, the lounge, the cat or a walk outside, and comes straight back when work arrives.
+  - **Queued**: hourglass, while the department waits for a free run slot.
+  - **Error**: red screen, shaking head, a drop of sweat.
+  - **Delivered**: the whole team cheers under confetti for a moment; the PM keeps the check mark.
+  - **Joining**: faded, with a moving box on the desk (approved, profile not written yet).
+- The line under the room counts who is doing what. Scenes stop when your system asks for reduced motion.
 - **Client desk**: send a request or reply to the PM. **Messages** holds what you read or answer (your messages, the
   PM's replies, approvals, errors) with "Needs your reply" on the PM's open question; **Activity** holds the team's
   work (tools, delegation, reports).
 - **Task board**: search, filter by owner, scrolling columns; Done shows the latest five until you expand it.
   Setup work by the PM (writing the PM profile, creating the team, writing skills) shows as `S` tasks.
 - **Release to main** merges `preview` into `main`; **Confirm migration** appears while a migrated project waits.
+- **Update office files** appears when a department still has the hooks, `/office` skill or CLAUDE.md section of an
+  older Agent Office version. It installs the current ones and commits only those files on the current branch (not on
+  `main`); your agents and their skills are not touched.
 
 ### Staff (HR)
 - Click a character for progress, tasks (open first, finished ones collapsed), recent activity and files.
@@ -114,7 +136,8 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
   eyewear, eyes, mouth, outfit and face details, plus a role accessory.
 - **Details** edits the profile (name, title, role, model, description, skills, tools, responsibilities). Skills shown
   dashed do not exist yet; the PM writes them on its next turn. **Make assistant** moves the person to the assistants
-  (helper agents that get no tasks); **Dismiss** moves the profile to `.office/dismissed/`.
+  (helper agents that get no tasks; they keep their name and look if they come back); **Dismiss** moves the profile to
+  `.office/dismissed/`.
 - **+ Hire staff**: nobody joins until you confirm.
   - **Auto**: describe who you need; the PM designs the role and sends a hire proposal. Press **Hire** to approve,
     then the PM writes the profile and skills.
@@ -129,8 +152,11 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
   Anything else is denied and the PM reports it.
 - `maxParallelRuns` (default 2) limits how many departments run at the same time; others wait in a queue.
 - Git pushes use the git credentials already set up on this machine.
+- The server listens on `127.0.0.1` only and answers API calls only from the dashboard itself: requests from other
+  web sites, or through a host name that is not localhost, are refused. Stopping the server stops running PM turns.
 
 ### Demo mode
 
 Open http://localhost:5178/?demo (or serve `dashboard/` with any static server) to see sample departments
-with simulated activity. Nothing is saved in demo mode.
+with simulated activity: four rooms with different looks (working, waiting for you, delivered, somebody joining).
+Nothing is saved in demo mode.

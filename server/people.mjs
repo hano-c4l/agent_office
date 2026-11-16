@@ -13,14 +13,17 @@ const NAMES = {
 
 // Shapes, not colors: hair, headwear, eyewear, eyes, mouth, outfit and face details.
 const HAIR_STYLES = {
-  female: ["long", "bob", "bun", "ponytail", "twintails", "braid", "curly", "afro", "short"],
-  male: ["short", "spiky", "side", "buzz", "mohawk", "curly", "afro", "bald", "long"],
+  female: ["long", "bob", "bun", "ponytail", "twintails", "braid", "curly", "afro", "short", "wavy", "pixie"],
+  male: ["short", "spiky", "side", "buzz", "mohawk", "curly", "afro", "bald", "long", "undercut", "quiff"],
 };
-const HEADWEAR = { female: ["none", "none", "none", "beanie", "headband", "bow", "cap"], male: ["none", "none", "none", "cap", "beanie", "bandana"] };
+const HEADWEAR = {
+  female: ["none", "none", "none", "none", "beanie", "headband", "bow", "cap", "beret", "flower"],
+  male: ["none", "none", "none", "none", "cap", "beanie", "bandana", "beret"],
+};
 const EYEWEAR = ["none", "none", "none", "round", "square", "sunglasses"];
 const EYES = ["tall", "dot", "happy", "sleepy", "wide"];
 const MOUTHS = ["small", "smile", "open", "flat"];
-const OUTFITS = ["tshirt", "collar", "hoodie", "sweater", "suit", "overalls", "scarf"];
+const OUTFITS = ["tshirt", "collar", "hoodie", "sweater", "suit", "overalls", "scarf", "vest", "jersey", "cardigan", "turtleneck"];
 const DETAILS = { female: ["none", "none", "freckles", "earrings", "blush"], male: ["none", "none", "beard", "mustache", "freckles", "stubble"] };
 const SKINS = ["#ffe0c7", "#f8d5b5", "#eac09c", "#f6cfa8", "#ffe7d1", "#d9a57c", "#c68a5e", "#a8704a"];
 const HAIRS = ["#2b2b2b", "#3d2b1f", "#5b3a29", "#8a5a2b", "#b5651d", "#d9a441", "#6b4f9e", "#e07a5f", "#1f2a44", "#9aa3ad"];
@@ -45,7 +48,7 @@ export function randomLook(gender = Math.random() < 0.5 ? "female" : "male", shi
     skin: pick(SKINS),
     hair: pick(HAIRS),
     hairStyle,
-    headwear: hairStyle === "afro" || hairStyle === "mohawk" ? "none" : pick(HEADWEAR[gender]),
+    headwear: ["afro", "mohawk", "quiff"].includes(hairStyle) ? "none" : pick(HEADWEAR[gender]),
     eyewear: pick(EYEWEAR),
     eyes: pick(EYES),
     mouth: pick(MOUTHS),
