@@ -51,11 +51,16 @@
       <span id="migrationText"></span>
       <button class="btn small primary" id="confirmMigrationBtn">Confirm migration</button>
     </div>
+    <div class="migration-banner office-banner" id="officeBanner" hidden>
+      <span>This department still has office files (hooks, <code>/office</code> skill, CLAUDE.md section) from an older Agent Office version.</span>
+      <button class="btn small primary" id="updateOfficeBtn">Update office files</button>
+    </div>
     <div class="helpers-strip" id="helpersStrip" hidden></div>
 
     <div class="room-layout">
       <div class="room-main">
         <div class="room big" id="roomStage"></div>
+        <div class="status-strip" id="statusStrip" aria-label="What the staff is doing"></div>
         <section class="board-wrap" aria-label="Task board">
           <div class="board-head">
             <h2>Task board</h2>
@@ -236,6 +241,7 @@
 
   <script src="js/data.js"></script>
   <script src="js/pixel.js"></script>
+  <script src="js/scenes.js"></script>
   <script src="js/app.js"></script>
   <script>
     // Draw the empty room on the "new department" tile.

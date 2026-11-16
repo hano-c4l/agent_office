@@ -4,6 +4,7 @@
 // so every department looks different and "randomize" simply picks a new seed.
 // Character state is a CSS class on each workstation group (st-working, st-idle, st-waiting, ...),
 // so animations live in CSS and the DOM can be updated without rebuilding the room.
+// Furniture that moves (fish, screens, steam, the office cat) carries an "amb-*" class; CSS animates it too.
 
 const BASE_PX = {
   outline: "#3a2f3f",
@@ -27,6 +28,10 @@ const ROLE_SHIRTS = {
 
 function rect(x, y, w, h, fill, cls = "") {
   return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"${cls ? ` class="${cls}"` : ""}/>`;
+}
+
+function group(cls, inner, attrs = "") {
+  return `<g class="${cls}"${attrs ? " " + attrs : ""}>${inner}</g>`;
 }
 
 // Box with a 1px outline.
@@ -92,6 +97,16 @@ function escAttr(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// Stable small number from a string, used to give each person their own habits.
+function hashOf(text) {
+  return [...String(text)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+}
+
+// Outlined sprite from a list of [x, y] pixels.
+function glyph(list, x, y, color) {
+  return pixelsToRects(withOutline(new Map(list.map(([px, py]) => [`${px},${py}`, color]))), x, y);
+}
+
 // Small deterministic random generator, so a seed always gives the same room.
 function seededRandom(seed) {
   let a = (Number(seed) || 0) >>> 0 || 1;
@@ -106,7 +121,9 @@ function seededRandom(seed) {
 
 // ---------- characters ----------
 
-const HEADWEAR_COLORS = { cap: "#d9534f", beanie: "#5a8be0", headband: "#e05a5a", bow: "#e8738a", bandana: "#c0392b" };
+const HEADWEAR_COLORS = {
+  cap: "#d9534f", beanie: "#5a8be0", headband: "#e05a5a", bow: "#e8738a", bandana: "#c0392b", beret: "#b5485d", flower: "#ff8fb1",
+};
 
 function lookParts(agent) {
   const look = agent.look || {};
@@ -167,6 +184,28 @@ function drawOutfit(p, parts, back = false) {
       fill(p, 3, 11, 10, 11, "#e05a5a");
       if (!back) fill(p, 9, 12, 9, 13, "#e05a5a");
       break;
+    case "vest": {
+      const vest = shade(shirt, -60);
+      if (back) fill(p, 2, 12, 11, 14, vest);
+      else { fill(p, 2, 12, 4, 14, vest); fill(p, 9, 12, 11, 14, vest); dots(p, [[4, 11], [9, 11]], vest); }
+      break;
+    }
+    case "jersey":
+      dots(p, [[1, 12], [12, 12]], PX.paper);
+      fill(p, 5, 12, 8, back ? 13 : 14, PX.paper);
+      if (!back) dots(p, [[6, 13], [7, 13]], dark);
+      break;
+    case "cardigan": {
+      const knit = shade(shirt, -38);
+      fill(p, 2, 11, 4, 14, knit);
+      fill(p, 9, 11, 11, 14, knit);
+      if (back) fill(p, 5, 11, 8, 14, knit);
+      else { fill(p, 5, 12, 8, 14, PX.paper); dots(p, [[5, 13], [5, 14]], "#f5c242"); }
+      break;
+    }
+    case "turtleneck":
+      fill(p, back ? 4 : 5, 11, back ? 9 : 8, 11, shade(shirt, 30));
+      break;
     default:
       break;
   }
@@ -183,6 +222,10 @@ function drawBackHair(p, parts) {
   if (style === "twintails") { fill(p, 0, 4, 1, 10, hair); fill(p, 12, 4, 13, 10, hair); }
   if (style === "braid") { fill(p, 11, 5, 12, 12, hair); dots(p, [[11, 7], [12, 9], [11, 11]], shade(hair, 30)); }
   if (style === "afro") { fill(p, 0, 2, 1, 8, hair); fill(p, 12, 2, 13, 8, hair); }
+  if (style === "wavy") {
+    fill(p, 1, 4, 2, 12, hair); fill(p, 11, 4, 12, 12, hair);
+    dots(p, [[0, 6], [13, 6], [0, 9], [13, 9], [0, 12], [13, 12]], hair);
+  }
 }
 
 function drawHead(p, skin) {
@@ -198,6 +241,12 @@ function drawFrontHair(p, parts) {
   if (style === "mohawk") { fill(p, 6, 0, 7, 3, hair); fill(p, 3, 2, 10, 2, shade(skin, -30)); return; }
   if (style === "buzz") { fill(p, 3, 2, 10, 2, hair); fill(p, 2, 3, 11, 3, shade(hair, 20)); return; }
   if (style === "afro") { fill(p, 1, 0, 12, 3, hair); fill(p, 2, 4, 3, 4, hair); fill(p, 10, 4, 11, 4, hair); return; }
+  if (style === "undercut") {
+    fill(p, 3, 1, 10, 3, hair);
+    dots(p, [[2, 3], [11, 3], [2, 4], [11, 4]], shade(skin, -24));
+    return;
+  }
+  if (style === "quiff") { fill(p, 4, 0, 9, 1, hair); p.set("10,1", hair); }
   if (style === "bun") fill(p, 5, 0, 8, 1, hair);
   if (style === "spiky") [3, 5, 8, 10].forEach((x) => p.set(`${x},1`, hair));
   if (style === "curly") { [3, 5, 7, 9].forEach((x) => p.set(`${x},1`, hair)); }
@@ -206,7 +255,9 @@ function drawFrontHair(p, parts) {
   if (style === "short" || style === "spiky") { fill(p, 2, 4, 5, 4, hair); p.set("2,5", hair); p.set("11,4", hair); p.set("11,5", hair); }
   if (style === "curly") { dots(p, [[2, 4], [4, 4], [9, 4], [11, 4], [2, 5], [11, 5]], hair); }
   if (style === "bun" || style === "ponytail" || style === "twintails") { fill(p, 2, 4, 4, 4, hair); fill(p, 10, 4, 11, 4, hair); }
-  if (style === "long") { fill(p, 2, 4, 4, 4, hair); fill(p, 9, 4, 11, 4, hair); }
+  if (style === "long" || style === "wavy") { fill(p, 2, 4, 4, 4, hair); fill(p, 9, 4, 11, 4, hair); }
+  if (style === "quiff") dots(p, [[2, 4], [11, 4]], hair);
+  if (style === "pixie") { fill(p, 2, 4, 9, 4, hair); dots(p, [[2, 5], [2, 6], [11, 4], [11, 5]], hair); }
   if (style === "bob") fill(p, 2, 4, 11, 4, hair);
   if (style === "side" || style === "braid") { fill(p, 2, 4, 8, 4, hair); fill(p, 2, 5, 3, 5, hair); p.set("11,4", hair); }
 }
@@ -222,6 +273,8 @@ function drawHeadwear(p, parts, back = false) {
   if (headwear === "beanie") { p.set("6,0", PX.paper); p.set("7,0", PX.paper); fill(p, 3, 1, 10, 1, c); fill(p, 2, 2, 11, 3, c); fill(p, 2, 4, 11, 4, shade(c, 30)); }
   if (headwear === "headband") fill(p, 2, 3, 11, 3, c);
   if (headwear === "bandana") { fill(p, 2, 2, 11, 3, c); dots(p, [[12, 4], [13, 5]], c); }
+  if (headwear === "beret") { fill(p, 4, 1, 10, 1, c); fill(p, 2, 2, 12, 3, c); p.set("9,0", shade(c, -35)); }
+  if (headwear === "flower") { dots(p, [[10, 1], [9, 2], [11, 2], [10, 3]], c); p.set("10,2", "#ffe08a"); }
   if (headwear === "bow") { dots(p, [[9, 1], [10, 2], [12, 1], [11, 2], [9, 2], [12, 2]], c); dots(p, [[10, 1], [11, 1]], shade(c, -30)); }
   if (role === "dev") { fill(p, 3, 1, 10, 1, "#3b3b4f"); fill(p, 1, 5, 1, 7, "#e05a5a"); fill(p, 12, 5, 12, 7, "#e05a5a"); }
 }
@@ -286,7 +339,9 @@ function characterBackPixels(agent) {
   drawOutfit(p, parts, true);
   drawHead(p, skin);
   dots(p, [[2, 6], [11, 6], [2, 7], [11, 7]], shade(skin, -15));
-  const covered = !["bald", "buzz", "mohawk"].includes(style);
+  const covered = !["bald", "buzz", "mohawk", "undercut"].includes(style);
+  if (style === "undercut") { fill(p, 3, 1, 10, 4, hair); fill(p, 2, 5, 11, 7, shade(skin, -24)); }
+  if (style === "wavy") { fill(p, 1, 4, 12, 12, hair); dots(p, [[0, 6], [13, 6], [0, 9], [13, 9], [0, 12], [13, 12]], hair); }
   if (covered) { fill(p, 3, 1, 10, 2, hair); fill(p, 2, 3, 11, 8, hair); fill(p, 3, 9, 10, 9, hair); }
   if (style === "buzz") fill(p, 2, 2, 11, 7, shade(hair, 20));
   if (style === "mohawk") fill(p, 6, 0, 7, 8, hair);
@@ -317,9 +372,42 @@ function characterSvg(agent, ox, oy, { back = false } = {}) {
   const arm = new Map();
   fill(arm, 12, 5, 13, 11, parts.outfit === "suit" ? "#3b3f52" : parts.shirt);
   fill(arm, 12, 3, 13, 4, parts.skin);
+  // An open mouth that flaps while the character talks.
+  const talk = new Map();
+  fill(talk, 6, 9, 7, 10, "#7a3b3b");
   return `<g class="body">${pixelsToRects(pixels, ox, oy)}
     <g class="lids">${pixelsToRects(lids, ox, oy)}</g>
+    <g class="talk-mouth">${pixelsToRects(talk, ox, oy)}</g>
     <g class="arm-up">${pixelsToRects(withOutline(arm), ox, oy)}</g></g>`;
+}
+
+// A standing character with legs, used when somebody leaves the desk and walks through the room.
+// The two leg groups alternate in CSS while the sprite moves.
+function walkerSvg(agent) {
+  const pants = agent.role === "leader" || (agent.look || {}).outfit === "suit" ? "#3b3f52" : "#4a5670";
+  const legs = (left, right) => {
+    const p = new Map();
+    fill(p, 3, 15, 6, 14 + left, pants);
+    fill(p, 7, 15, 10, 14 + right, pants);
+    fill(p, 3, 15 + left, 6, 15 + left, "#2a2433");
+    fill(p, 7, 15 + right, 10, 15 + right, "#2a2433");
+    return pixelsToRects(withOutline(p));
+  };
+  const mug = box(11, 9, 5, 5, PX.paper) + rect(13, 10, 2, 1, "#b07d4f");
+  return `<svg class="walker-svg" viewBox="-1 -1 18 22" shape-rendering="crispEdges" aria-hidden="true">
+    <g class="leg-s">${legs(3, 3)}</g><g class="leg-a">${legs(3, 2)}</g><g class="leg-b">${legs(2, 3)}</g>
+    <g class="walker-body">${pixelsToRects(withOutline(characterPixels(agent)))}</g>
+    <g class="walker-mug">${mug}</g></svg>`;
+}
+
+// Small sprites that fly between desks: a task on its way to somebody, or a finished report coming back.
+function noteSvg(kind) {
+  const inner = kind === "report"
+    ? box(0, 0, 9, 11, PX.paper) + rect(2, 2, 5, 1, PX.metal) + rect(2, 4, 4, 1, PX.metal) +
+      rect(2, 7, 1, 1, "#22744c") + rect(3, 8, 1, 1, "#22744c") + rect(4, 7, 1, 1, "#22744c") + rect(5, 6, 1, 1, "#22744c") + rect(6, 5, 1, 1, "#22744c")
+    : box(0, 1, 11, 8, "#fff3a6") + rect(1, 2, 1, 1, PX.outline) + rect(2, 3, 1, 1, PX.outline) + rect(3, 4, 1, 1, PX.outline) +
+      rect(4, 5, 3, 1, PX.outline) + rect(7, 4, 1, 1, PX.outline) + rect(8, 3, 1, 1, PX.outline) + rect(9, 2, 1, 1, PX.outline);
+  return `<svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true">${inner}</svg>`;
 }
 
 // Square portrait used in the panel and the team proposal.
@@ -350,23 +438,43 @@ function cactus(x, y) {
   return pixelsToRects(withOutline(p), x, y);
 }
 
-function windowSvg(x, y, w, h, night = false) {
-  if (night) {
-    return box(x, y, w, h, PX.frame) + rect(x + 2, y + 2, w - 4, h - 4, "#1d2547") +
-      rect(x + 6, y + 5, 1, 1, "#ffffff") + rect(x + w - 9, y + 8, 1, 1, "#ffffff") + rect(x + 12, y + 10, 1, 1, "#fff3a6") +
-      rect(x + w - 12, y + 4, 3, 3, "#fff3a6") + rect(x + Math.floor(w / 2) - 1, y + 1, 2, h - 2, PX.frame);
-  }
-  return box(x, y, w, h, PX.frame) + rect(x + 2, y + 2, w - 4, h - 4, PX.glass) +
-    rect(x + 2, y + 2, w - 4, 3, PX.glassLight) + rect(x + Math.floor(w / 2) - 1, y + 1, 2, h - 2, PX.frame) +
-    rect(x + 3, y + h - 6, w - 6, 3, "#9fcf8a");
+// The sky in the windows follows the time of day: "day", "sunset" or "night".
+function skyPhase(date = new Date()) {
+  const h = date.getHours();
+  if (h >= 6 && h < 17) return "day";
+  if (h >= 17 && h < 19) return "sunset";
+  return "night";
 }
 
-function roundWindow(x, y) {
+function windowSvg(x, y, w, h, sky = "day") {
+  const bar = rect(x + Math.floor(w / 2) - 1, y + 1, 2, h - 2, PX.frame);
+  if (sky === "night") {
+    return box(x, y, w, h, PX.frame) + rect(x + 2, y + 2, w - 4, h - 4, "#1d2547") +
+      rect(x + 6, y + 5, 1, 1, "#ffffff", "amb-star") + rect(x + w - 9, y + 8, 1, 1, "#ffffff", "amb-star s2") +
+      rect(x + 12, y + 10, 1, 1, "#fff3a6", "amb-star s3") + rect(x + w - 12, y + 4, 3, 3, "#fff3a6") +
+      rect(x + w - 11, y + 4, 2, 2, "#1d2547") + bar + rect(x + 3, y + h - 5, w - 6, 2, "#2b3a4f");
+  }
+  if (sky === "sunset") {
+    return box(x, y, w, h, PX.frame) + rect(x + 2, y + 2, w - 4, h - 4, "#ffb37a") + rect(x + 2, y + 2, w - 4, 4, "#f58f6c") +
+      rect(x + 2, y + 6, w - 4, 2, "#fba36f") + rect(x + w - 12, y + h - 10, 5, 5, "#ffe08a") + bar +
+      rect(x + 3, y + h - 6, w - 6, 3, "#7d8f5a");
+  }
+  const cloud = group("amb-cloud", rect(x + 4, y + 5, 7, 2, "#ffffff") + rect(x + 6, y + 4, 3, 1, "#ffffff"), `style="--drift:${w - 16}px"`);
+  return box(x, y, w, h, PX.frame) + rect(x + 2, y + 2, w - 4, h - 4, PX.glass) +
+    rect(x + 2, y + 2, w - 4, 3, PX.glassLight) + cloud + bar + rect(x + 3, y + h - 6, w - 6, 3, "#9fcf8a");
+}
+
+function roundWindow(x, y, sky = "day") {
+  const glass = { day: PX.glass, sunset: "#ffb37a", night: "#1d2547" }[sky];
   const p = new Map();
   fill(p, 3, 0, 10, 0, PX.frame); fill(p, 1, 1, 12, 1, PX.frame); fill(p, 0, 2, 13, 11, PX.frame);
   fill(p, 1, 12, 12, 12, PX.frame); fill(p, 3, 13, 10, 13, PX.frame);
-  fill(p, 3, 2, 10, 11, PX.glass); fill(p, 2, 3, 11, 10, PX.glass); fill(p, 3, 3, 6, 4, PX.glassLight);
-  return pixelsToRects(withOutline(p), x, y);
+  fill(p, 3, 2, 10, 11, glass); fill(p, 2, 3, 11, 10, glass);
+  if (sky === "day") fill(p, 3, 3, 6, 4, PX.glassLight);
+  if (sky === "sunset") fill(p, 7, 7, 9, 9, "#ffe08a");
+  let s = pixelsToRects(withOutline(p), x, y);
+  if (sky === "night") s += rect(x + 4, y + 4, 1, 1, "#ffffff", "amb-star") + rect(x + 9, y + 8, 1, 1, "#fff3a6", "amb-star s2");
+  return s;
 }
 
 function whiteboard(x, y) {
@@ -375,7 +483,8 @@ function whiteboard(x, y) {
 }
 
 function clock(x, y) {
-  return box(x, y, 9, 9, "#fbfdff") + rect(x + 4, y + 2, 1, 3, PX.outline) + rect(x + 4, y + 4, 3, 1, PX.outline);
+  return box(x, y, 9, 9, "#fbfdff") + rect(x + 4, y + 4, 3, 1, PX.outline) +
+    `<rect class="amb-hand" x="${x + 4}" y="${y + 2}" width="1" height="3" fill="#c0392b" style="transform-origin:${x + 4.5}px ${y + 4.5}px"/>`;
 }
 
 function posters(x, y) {
@@ -384,9 +493,37 @@ function posters(x, y) {
 }
 
 function wallScreen(x, y) {
-  return box(x, y, 40, 19, "#1f2633") + rect(x + 3, y + 3, 14, 2, "#5cc28f") + rect(x + 3, y + 7, 22, 1, "#6fa3ef") +
-    rect(x + 3, y + 10, 18, 1, "#6fa3ef") + rect(x + 26, y + 4, 10, 10, "#2d3a4f") + rect(x + 28, y + 9, 2, 4, "#f5c242") +
-    rect(x + 31, y + 6, 2, 7, "#5cc28f") + rect(x + 18, y + 19, 4, 3, PX.metalDark);
+  return box(x, y, 40, 19, "#1f2633") + rect(x + 3, y + 3, 14, 2, "#5cc28f", "amb-blink slow") + rect(x + 3, y + 7, 22, 1, "#6fa3ef") +
+    rect(x + 3, y + 10, 18, 1, "#6fa3ef") + rect(x + 3, y + 13, 9, 1, "#6fa3ef", "amb-blink") + rect(x + 26, y + 4, 10, 10, "#2d3a4f") +
+    rect(x + 27, y + 9, 2, 4, "#f5c242", "amb-bar") + rect(x + 30, y + 6, 2, 7, "#5cc28f", "amb-bar b2") +
+    rect(x + 33, y + 8, 2, 5, "#e8738a", "amb-bar b3") + rect(x + 18, y + 19, 4, 3, PX.metalDark);
+}
+
+// Team kanban board with sticky notes; one note wiggles as if it was just moved.
+function kanbanBoard(x, y) {
+  let s = box(x, y, 36, 18, "#fbfdff") + rect(x + 12, y + 1, 1, 16, "#d7dbdf") + rect(x + 24, y + 1, 1, 16, "#d7dbdf");
+  [[2, 3, "#f5c242"], [2, 8, "#e8738a"], [7, 5, "#6fa3ef"], [14, 3, "#5cc28f"], [18, 9, "#f5c242"], [26, 3, "#a98ae6"], [30, 8, "#5cc28f"], [26, 12, "#ee9a48"]]
+    .forEach(([dx, dy, c], i) => { s += rect(x + dx, y + dy, 4, 4, c, i === 4 ? "amb-wiggle" : ""); });
+  return s;
+}
+
+function pictureFrames(x, y) {
+  return box(x, y + 2, 11, 13, PX.woodFront) + rect(x + 2, y + 4, 7, 9, "#bfe3f2") + rect(x + 2, y + 10, 7, 3, "#7cc35a") + rect(x + 6, y + 6, 2, 2, "#fff3a6") +
+    box(x + 13, y, 9, 9, PX.frame) + rect(x + 15, y + 2, 5, 5, "#f2a65a") + rect(x + 16, y + 3, 3, 3, "#e05a5a") +
+    box(x + 13, y + 11, 9, 7, PX.woodDark) + rect(x + 15, y + 13, 5, 3, "#a98ae6") +
+    box(x + 24, y + 3, 10, 12, PX.frame) + rect(x + 26, y + 5, 6, 8, "#ffd0d9") + rect(x + 28, y + 7, 2, 4, "#c2405a");
+}
+
+function wallCalendar(x, y) {
+  let s = box(x, y, 16, 17, PX.paper) + rect(x + 1, y + 1, 14, 4, "#e05a5a") + rect(x + 4, y - 1, 1, 3, PX.metalDark) + rect(x + 11, y - 1, 1, 3, PX.metalDark);
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) s += rect(x + 2 + c * 3, y + 7 + r * 3, 2, 2, r === 1 && c === 2 ? "#e05a5a" : "#c9d0d6");
+  return s;
+}
+
+// Air conditioner with drifting air.
+function airConditioner(x, y) {
+  return box(x, y, 28, 9, "#f4f4f1") + rect(x + 2, y + 6, 24, 1, "#aab2bb") + rect(x + 23, y + 2, 2, 1, "#5cc28f", "amb-blink slow") +
+    group("amb-air", rect(x + 5, y + 10, 4, 1, "#dff4fc") + rect(x + 13, y + 11, 5, 1, "#dff4fc") + rect(x + 21, y + 10, 3, 1, "#dff4fc"));
 }
 
 function worldMap(x, y) {
@@ -403,8 +540,10 @@ function banner(x, y) {
 }
 
 function neonSign(x, y) {
-  return box(x, y, 30, 12, "#2a2433") + rect(x + 4, y + 3, 2, 6, "#ff6fb5") + rect(x + 6, y + 3, 4, 2, "#ff6fb5") +
-    rect(x + 12, y + 3, 2, 6, "#6ff2ff") + rect(x + 14, y + 7, 4, 2, "#6ff2ff") + rect(x + 20, y + 3, 6, 2, "#fff36f") + rect(x + 22, y + 5, 2, 4, "#fff36f");
+  return box(x, y, 30, 12, "#2a2433") +
+    group("amb-flicker", rect(x + 4, y + 3, 2, 6, "#ff6fb5") + rect(x + 6, y + 3, 4, 2, "#ff6fb5")) +
+    rect(x + 12, y + 3, 2, 6, "#6ff2ff") + rect(x + 14, y + 7, 4, 2, "#6ff2ff") +
+    group("amb-blink slow", rect(x + 20, y + 3, 6, 2, "#fff36f") + rect(x + 22, y + 5, 2, 4, "#fff36f"));
 }
 
 function plantShelf(x, y) {
@@ -435,29 +574,69 @@ function waterCooler(x, y) {
 
 function coffeeMachine(x, y) {
   return box(x, y + 4, 16, 6, PX.woodFront) + box(x + 3, y - 6, 10, 11, PX.metalDark) +
-    rect(x + 5, y - 4, 6, 2, "#e05a5a") + rect(x + 6, y + 1, 4, 3, PX.paper);
+    rect(x + 5, y - 4, 6, 2, "#e05a5a") + rect(x + 6, y + 1, 4, 3, PX.paper) +
+    group("amb-steam", rect(x + 7, y - 2, 1, 2, "#ffffff") + rect(x + 9, y - 3, 1, 2, "#ffffff"));
 }
 
 function vendingMachine(x, y) {
   let s = box(x, y - 8, 16, 24, "#d9534f") + rect(x + 2, y - 6, 9, 16, "#2a2433");
   ["#f5c242", "#5cc28f", "#6fa3ef", "#ffffff"].forEach((c, i) => { s += rect(x + 3, y - 5 + i * 4, 3, 2, c) + rect(x + 7, y - 5 + i * 4, 3, 2, c); });
-  return s + rect(x + 12, y - 4, 2, 6, PX.paper) + rect(x + 2, y + 12, 9, 2, "#2a2433");
+  return s + rect(x + 12, y - 4, 2, 6, PX.paper) + rect(x + 12, y + 4, 2, 1, "#5cc28f", "amb-blink") + rect(x + 2, y + 12, 9, 2, "#2a2433");
 }
 
 function aquarium(x, y) {
   return box(x, y + 10, 26, 6, PX.woodFront) + box(x + 1, y - 4, 24, 15, "#7fd0ef") + rect(x + 2, y - 3, 22, 2, "#b9ecfb") +
-    rect(x + 6, y + 2, 4, 2, "#ff8c42") + rect(x + 10, y + 2, 1, 2, "#ff8c42") + rect(x + 16, y + 5, 3, 2, "#f5c242") +
-    rect(x + 3, y + 6, 1, 4, "#3d7a36") + rect(x + 21, y + 4, 1, 6, "#3d7a36");
+    rect(x + 3, y + 6, 1, 4, "#3d7a36") + rect(x + 21, y + 4, 1, 6, "#3d7a36") + rect(x + 12, y + 7, 1, 3, "#3d7a36") +
+    group("amb-fish", rect(x + 4, y + 1, 4, 2, "#ff8c42") + rect(x + 3, y + 1, 1, 2, "#e0662a") + rect(x + 7, y + 1, 1, 1, PX.outline)) +
+    group("amb-fish f2", rect(x + 17, y + 5, 3, 2, "#f5c242") + rect(x + 20, y + 5, 1, 2, "#d9a441") + rect(x + 17, y + 5, 1, 1, PX.outline)) +
+    rect(x + 9, y + 6, 1, 1, "#dff4fc", "amb-bubble") + rect(x + 15, y + 4, 1, 1, "#dff4fc", "amb-bubble b2");
 }
 
 function arcade(x, y) {
-  return box(x, y - 10, 16, 26, "#6a4aa6") + box(x + 2, y - 7, 12, 9, "#1f2633") + rect(x + 4, y - 5, 3, 2, "#5cc28f") +
-    rect(x + 9, y - 3, 3, 2, "#ff6fb5") + rect(x + 2, y + 4, 12, 3, "#2a2433") + rect(x + 4, y + 4, 2, 2, "#e05a5a") + rect(x + 10, y + 5, 2, 1, "#f5c242");
+  return box(x, y - 10, 16, 26, "#6a4aa6") + box(x + 2, y - 7, 12, 9, "#1f2633") + rect(x + 4, y - 5, 3, 2, "#5cc28f", "amb-blink") +
+    rect(x + 9, y - 3, 3, 2, "#ff6fb5", "amb-blink slow") + rect(x + 6, y - 1, 2, 1, "#fff36f", "amb-flicker") +
+    rect(x + 2, y + 4, 12, 3, "#2a2433") + rect(x + 4, y + 4, 2, 2, "#e05a5a") + rect(x + 10, y + 5, 2, 1, "#f5c242");
 }
 
 function printer(x, y) {
-  return box(x, y + 4, 18, 12, PX.metalDark) + box(x + 2, y, 14, 6, "#cfd6de") + rect(x + 4, y - 3, 10, 3, PX.paper) +
-    rect(x + 3, y + 8, 4, 1, "#5cc28f");
+  return rect(x + 4, y - 3, 10, 3, PX.paper, "amb-paper") + box(x, y + 4, 18, 12, PX.metalDark) + box(x + 2, y, 14, 6, "#cfd6de") +
+    rect(x + 3, y + 8, 4, 1, "#5cc28f", "amb-blink slow");
+}
+
+// Server rack with busy status lights.
+function serverRack(x, y) {
+  let s = box(x, y - 10, 14, 26, "#2a2f3a");
+  for (let i = 0; i < 5; i++) {
+    s += rect(x + 2, y - 8 + i * 5, 10, 3, "#3d4452") + rect(x + 3, y - 7 + i * 5, 1, 1, "#5cc28f", `amb-blink${i % 2 ? " slow" : ""}`) +
+      rect(x + 5, y - 7 + i * 5, 1, 1, i === 3 ? "#f5c242" : "#6fa3ef", i % 3 ? "amb-flicker" : "amb-blink");
+  }
+  return s;
+}
+
+// The office cat asleep on a cushion: the tail flicks and the ears twitch now and then.
+function officeCat(x, y, color = "#e8a25c") {
+  const dark = shade(color, -45);
+  const p = new Map();
+  fill(p, 2, 3, 11, 7, color); fill(p, 1, 4, 1, 6, color); fill(p, 3, 2, 6, 2, color);
+  dots(p, [[2, 1], [5, 1]], color);
+  dots(p, [[3, 4], [5, 4]], PX.outline);
+  dots(p, [[8, 3], [10, 3], [8, 5], [10, 5]], dark);
+  p.set("4,5", "#f4a3a3");
+  const tail = new Map();
+  fill(tail, 12, 5, 13, 6, color); fill(tail, 13, 3, 14, 4, dark);
+  return box(x - 1, y + 6, 18, 5, "#c27ac9") + rect(x, y + 7, 16, 1, shade("#c27ac9", 30)) +
+    pixelsToRects(withOutline(p), x, y) + group("amb-tail", pixelsToRects(withOutline(tail), x, y)) +
+    group("amb-zzz", glyph([[0, 0], [1, 0], [2, 0], [1, 1], [0, 2], [1, 2], [2, 2]], x + 2, y - 7, "#ffffff"));
+}
+
+function recyclingBins(x, y) {
+  const bin = (bx, c) => box(bx, y + 3, 8, 12, c) + box(bx - 1, y + 1, 10, 3, shade(c, -30)) + rect(bx + 3, y + 7, 2, 4, PX.paper);
+  return bin(x + 1, "#5a8be0") + bin(x + 12, "#5cc28f");
+}
+
+function coatRack(x, y) {
+  return rect(x + 5, y - 10, 1, 25, PX.woodDark) + box(x + 2, y + 14, 7, 3, PX.woodDark) + rect(x + 2, y - 9, 7, 1, PX.woodDark) +
+    box(x, y - 8, 5, 10, "#e8738a") + box(x + 6, y - 7, 5, 8, "#5a6c96");
 }
 
 function beanbags(x, y) {
@@ -470,7 +649,8 @@ function beanbags(x, y) {
 }
 
 function floorLamp(x, y) {
-  return rect(x + 4, y - 4, 1, 16, PX.metalDark) + box(x, y - 9, 9, 6, "#fff3a6") + box(x + 1, y + 12, 7, 3, PX.metalDark);
+  return rect(x - 2, y - 11, 13, 10, "#fff3a6", "amb-lamp") + rect(x + 4, y - 4, 1, 16, PX.metalDark) +
+    box(x, y - 9, 9, 6, "#fff3a6") + box(x + 1, y + 12, 7, 3, PX.metalDark);
 }
 
 // ---------- desks and chairs ----------
@@ -524,7 +704,19 @@ function statusIcons(x, y) {
     <g class="icon icon-alert">${bubble(rect(x + 6, y + 2, 1, 4, "#c0392b") + rect(x + 6, y + 7, 1, 1, "#c0392b"), "#a77b00", "#ffd84d")}</g>
     <g class="icon icon-error">${bubble(rect(x + 4, y + 3, 5, 1, "#ffffff") + rect(x + 3, y + 5, 7, 1, "#ffffff"), "#555b66", "#8b93a1")}</g>
     <g class="icon icon-done">${bubble(rect(x + 4, y + 5, 1, 1, "#22744c") + rect(x + 5, y + 6, 1, 1, "#22744c") +
-      rect(x + 6, y + 5, 1, 1, "#22744c") + rect(x + 7, y + 4, 1, 1, "#22744c") + rect(x + 8, y + 3, 1, 1, "#22744c"), "#2f8a5b", "#d8f5e5")}</g>`;
+      rect(x + 6, y + 5, 1, 1, "#22744c") + rect(x + 7, y + 4, 1, 1, "#22744c") + rect(x + 8, y + 3, 1, 1, "#22744c"), "#2f8a5b", "#d8f5e5")}</g>
+    <g class="icon icon-bulb">${bubble(rect(x + 5, y + 2, 3, 3, "#f5a623") + rect(x + 4, y + 3, 5, 1, "#f5a623") +
+      rect(x + 6, y + 5, 1, 2, PX.metalDark), "#a77b00", "#fff8d6")}</g>
+    <g class="icon icon-queue">${bubble(rect(x + 4, y + 2, 5, 1, "#8a5a2b") + rect(x + 4, y + 7, 5, 1, "#8a5a2b") +
+      rect(x + 5, y + 3, 3, 1, "#f5c242") + rect(x + 6, y + 4, 1, 1, "#f5c242") +
+      `<rect class="sand" x="${x + 6}" y="${y + 5}" width="1" height="1" fill="#f5c242"/>` + rect(x + 5, y + 6, 3, 1, "#f5c242"), "#a77b00", "#fff2c2")}</g>
+    <g class="icon icon-zzz">${group("z1", glyph([[0, 0], [1, 0], [2, 0], [1, 1], [0, 2], [1, 2], [2, 2]], x + 1, y + 5, "#ffffff"))}
+      ${group("z2", glyph([[0, 0], [1, 0], [2, 0], [3, 0], [2, 1], [1, 2], [0, 3], [1, 3], [2, 3], [3, 3]], x + 6, y - 1, "#ffffff"))}</g>
+    <g class="icon icon-note">${group("n1", glyph([[2, 0], [3, 0], [2, 1], [2, 2], [2, 3], [0, 3], [1, 3], [0, 4], [1, 4]], x + 1, y + 3, "#ff6fb5"))}
+      ${group("n2", glyph([[2, 0], [3, 1], [2, 1], [2, 2], [2, 3], [0, 3], [1, 3], [0, 4], [1, 4]], x + 8, y, "#6fa3ef"))}</g>
+    <g class="icon icon-sweat">${glyph([[1, 0], [0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2], [1, 3]], x - 15, y + 8, "#7fd0ef")}</g>
+    <g class="icon icon-confetti">${[["#e05a5a", -14, 2], ["#f5c242", -9, -3], ["#5cc28f", -3, 1], ["#6fa3ef", 3, -4], ["#a98ae6", 9, 0], ["#ff6fb5", 14, -2]]
+      .map(([c, dx, dy], i) => rect(x + dx, y + dy, 2, 2, c, `c${i % 3}`)).join("")}</g>`;
 }
 
 // A desk with its chair, the agent, a laptop and a role prop, facing the viewer. Slot: 44 x 40 (wide: 62 x 40).
@@ -535,18 +727,22 @@ function workstationSvg(agent, x, y, { wide = false, desk = "wood", chair = "off
   const cx = x + 2 + Math.floor(w / 2) - 7; // character left edge
   const deskY = y + 22;
   const skin = (agent.look && agent.look.skin) || "#ffe0c7";
+  // data-idle picks what this person does when there is no work (coffee, a nap, music, the phone).
   return `
-  <g class="ws st-idle" data-agent="${escAttr(agent.id)}">
+  <g class="ws st-idle" data-agent="${escAttr(agent.id)}" data-idle="${hashOf(agent.id) % 4}">
     ${rect(dx + 2, deskY + 12, dw - 4, 2, "rgba(90,60,30,.18)")}
     ${chairBackSvg(cx, y, chair)}
     ${characterSvg(agent, cx, y + 6)}
     <rect class="glow" x="${cx + 2}" y="${y + 9}" width="10" height="7" fill="#9fe7ff"/>
+    <g class="phone">${box(cx + 5, y + 16, 4, 6, "#2a2433")}${rect(cx + 6, y + 17, 2, 3, "#9fe7ff")}</g>
     ${deskSvg(dx, deskY, dw, desk)}
-    ${box(cx + 2, deskY - 3, 10, 5, PX.metal)}${rect(cx + 6, deskY - 2, 2, 2, PX.frame)}
+    <g class="laptop">${box(cx + 2, deskY - 3, 10, 5, PX.metal)}${rect(cx + 6, deskY - 2, 2, 2, PX.frame)}</g>
+    <g class="sparks">${rect(cx + 3, deskY - 5, 1, 1, "#5cc28f", "k0")}${rect(cx + 7, deskY - 6, 1, 1, "#6fa3ef", "k1")}${rect(cx + 10, deskY - 5, 1, 1, "#f5c242", "k2")}</g>
     <g class="hands">${rect(cx, deskY + 1, 2, 1, skin)}${rect(cx + 12, deskY + 1, 2, 1, skin)}</g>
     <g class="mug">${box(x + w - 7, deskY - 3, 5, 5, PX.paper)}${rect(x + w - 2, deskY - 2, 1, 2, PX.outline)}
       <g class="steam">${rect(x + w - 6, deskY - 6, 1, 2, "#ffffff")}${rect(x + w - 4, deskY - 8, 1, 2, "#ffffff")}</g></g>
-    ${deskProp(agent.role, x + 4, deskY - 8)}
+    <g class="prop">${deskProp(agent.role, x + 4, deskY - 8)}</g>
+    <g class="movebox">${box(x + 3, deskY - 9, 10, 10, "#c9955c")}${rect(x + 4, deskY - 5, 8, 1, "#a8743d")}${rect(x + 7, deskY - 8, 2, 8, "#e8d3a8")}</g>
     ${wide ? deskProp("sa", x + 15, deskY - 8) : ""}
     ${statusIcons(cx + 9, y - 6)}
   </g>`;
@@ -557,9 +753,10 @@ function workstationBackSvg(agent, x, y, { desk = "wood", chair = "office" } = {
   const w = 40;
   const cx = x + 2 + Math.floor(w / 2) - 7;
   return `
-  <g class="ws st-idle back" data-agent="${escAttr(agent.id)}">
+  <g class="ws st-idle back" data-agent="${escAttr(agent.id)}" data-idle="${hashOf(agent.id) % 4}">
     ${deskSvg(x + 2, y, w, desk)}
     ${box(cx + 1, y - 4, 12, 7, PX.metalDark)}<rect class="screen" x="${cx + 2}" y="${y - 3}" width="10" height="5" fill="#9fe7ff"/>
+    <g class="code">${rect(cx + 3, y - 2, 5, 1, "#2b5ea7", "k0")}${rect(cx + 3, y, 7, 1, "#22744c", "k1")}</g>
     <rect class="glow" x="${cx + 2}" y="${y - 3}" width="10" height="5" fill="#ffffff"/>
     ${box(x + w - 6, y + 1, 5, 5, PX.paper)}
     ${characterSvg(agent, cx, y + 8, { back: true })}
@@ -601,12 +798,57 @@ function roundTable(x, y) {
   return s + rect(x + 15, y + 12, 6, 3, PX.paper);
 }
 
+// Kitchen corner: counter with a coffee machine and a sink, a fridge and two stools.
+function kitchen(x, y) {
+  return box(x, y + 6, 40, 12, PX.wood) + rect(x + 1, y + 13, 38, 4, PX.woodFront) +
+    box(x + 3, y - 2, 9, 9, PX.metalDark) + rect(x + 5, y, 5, 2, "#e05a5a") + rect(x + 6, y + 4, 3, 2, PX.paper) +
+    group("amb-steam", rect(x + 6, y - 4, 1, 2, "#ffffff") + rect(x + 9, y - 5, 1, 2, "#ffffff")) +
+    box(x + 17, y + 7, 10, 5, "#cfd6de") + rect(x + 21, y + 4, 1, 4, PX.metalDark) + rect(x + 21, y + 4, 3, 1, PX.metalDark) +
+    box(x + 30, y + 3, 5, 4, "#f2a65a") + rect(x + 31, y + 2, 2, 1, "#5aa04a") +
+    box(x + 42, y - 6, 14, 26, "#e9eef2") + rect(x + 43, y + 4, 12, 1, "#aab2bb") + rect(x + 53, y - 2, 1, 4, PX.metalDark) + rect(x + 53, y + 7, 1, 5, PX.metalDark) +
+    box(x + 6, y + 24, 9, 5, PX.chair) + rect(x + 10, y + 29, 1, 4, PX.metalDark) +
+    box(x + 24, y + 24, 9, 5, PX.chair) + rect(x + 28, y + 29, 1, 4, PX.metalDark);
+}
+
+// Reading corner: bookshelves, an armchair and a reading lamp.
+function libraryCorner(x, y) {
+  const seat = PX.accent;
+  return bookshelf(x, y - 4) + bookshelf(x + 28, y - 4).replace(/#e05a5a/g, "#6fa3ef") +
+    box(x + 4, y + 24, 20, 14, seat) + rect(x + 5, y + 25, 18, 3, shade(seat, 25)) + box(x + 2, y + 28, 4, 10, shade(seat, -25)) + box(x + 22, y + 28, 4, 10, shade(seat, -25)) +
+    box(x + 32, y + 30, 10, 6, PX.wood) + rect(x + 34, y + 28, 5, 2, "#e05a5a") + rect(x + 35, y + 26, 4, 2, "#5a8be0") +
+    floorLamp(x + 46, y + 22);
+}
+
+// Indoor garden: plants, a small pond and a bench.
+function gardenCorner(x, y) {
+  return box(x + 14, y + 2, 28, 14, "#7fd0ef", "#5d6470") + rect(x + 16, y + 4, 10, 2, "#b9ecfb") +
+    group("amb-fish", rect(x + 19, y + 9, 3, 2, "#ff8c42") + rect(x + 18, y + 9, 1, 2, "#e0662a")) +
+    rect(x + 33, y + 6, 3, 2, "#5aa04a") + rect(x + 35, y + 5, 2, 1, "#ff8fb1") +
+    plant(x + 1, y - 2, true) + plant(x + 46, y - 4, true) + cactus(x + 4, y + 22) +
+    box(x + 16, y + 26, 28, 6, PX.wood) + rect(x + 18, y + 32, 2, 4, PX.woodDark) + rect(x + 40, y + 32, 2, 4, PX.woodDark) +
+    plant(x + 48, y + 26);
+}
+
 function lounge(kind, x, y) {
   if (kind === "sofa") return sofaCorner(x + 8, y + 6);
   if (kind === "pingpong") return pingPong(x + 10, y + 14);
   if (kind === "round") return roundTable(x + 8, y + 12);
+  if (kind === "kitchen") return kitchen(x + 3, y + 10);
+  if (kind === "library") return libraryCorner(x + 3, y + 8);
+  if (kind === "garden") return gardenCorner(x + 3, y + 8);
   return meetingTable(x + 12, y + 14);
 }
+
+// Where people stand when they visit the lounge (offsets from the lounge corner) and what they do there.
+const LOUNGE_SPOTS = {
+  meeting: [{ dx: 0, dy: 10, emote: "💬" }, { dx: 46, dy: 10, emote: "💬" }],
+  sofa: [{ dx: 0, dy: 14, emote: "📺" }, { dx: 47, dy: 14, emote: "🍿" }],
+  pingpong: [{ dx: 0, dy: 12, emote: "🏓" }, { dx: 47, dy: 12, emote: "🏓" }],
+  round: [{ dx: 1, dy: 0, emote: "💬" }, { dx: 45, dy: 0, emote: "☕" }],
+  kitchen: [{ dx: 8, dy: 18, emote: "☕", mug: true }, { dx: 30, dy: 18, emote: "🍪" }],
+  library: [{ dx: 26, dy: 22, emote: "📖" }],
+  garden: [{ dx: 20, dy: 16, emote: "🌿" }, { dx: 40, dy: 14, emote: "🐟" }],
+};
 
 // ---------- room style ----------
 
@@ -635,13 +877,14 @@ const PALETTES = [
     rug: "#f7d6a0", rugEdge: "#e6b867", chair: "#e0645a", chairDark: "#b4473e", accent: "#f2a65a" } },
 ];
 
-const LAYOUTS = ["rows", "cubicles", "pods", "bench"];
-const LOUNGES = ["meeting", "sofa", "pingpong", "round"];
+const LAYOUTS = ["rows", "cubicles", "pods", "bench", "stagger", "duo"];
+const LOUNGES = ["meeting", "sofa", "pingpong", "round", "kitchen", "library", "garden"];
 const DESKS = ["wood", "white", "dark"];
 const CHAIRS = ["office", "gaming", "stool"];
-const WALL_DECOR = ["whiteboard", "posters", "screen", "map", "banner", "neon", "plantShelf", "clock"];
-const FLOOR_EXTRAS = ["coffee", "cooler", "vending", "aquarium", "arcade", "printer", "beanbags", "lamp", "bigPlant"];
+const WALL_DECOR = ["whiteboard", "posters", "screen", "map", "banner", "neon", "plantShelf", "clock", "kanban", "frames", "calendar", "aircon"];
+const FLOOR_EXTRAS = ["coffee", "cooler", "vending", "aquarium", "arcade", "printer", "beanbags", "lamp", "bigPlant", "servers", "cat", "bins", "coats"];
 const PM_SHELVES = ["bookshelf", "trophies", "plantShelf"];
+const CAT_COLORS = ["#e8a25c", "#5d6470", "#f4f4f1", "#3a2f3f"];
 
 function pickFrom(rnd, list) {
   return list[Math.floor(rnd() * list.length)];
@@ -669,8 +912,10 @@ function roomStyle(seed) {
     windows: 1 + Math.floor(rnd() * 3),
     roundWindows: rnd() < 0.25,
     wallDecor: pickMany(rnd, WALL_DECOR, 2),
-    extras: pickMany(rnd, FLOOR_EXTRAS, 3),
+    extras: pickMany(rnd, FLOOR_EXTRAS, 4),
     pmShelf: pickFrom(rnd, PM_SHELVES),
+    teamRug: rnd() < 0.4,
+    catColor: pickFrom(rnd, CAT_COLORS),
   };
 }
 
@@ -690,6 +935,12 @@ function roomLayout(agents, style = roomStyle(0)) {
   const seats = [];
   let bottom = TEAM_Y + 40;
 
+  // A desk facing the viewer. aisleY is where its owner stands after getting up.
+  const front = (agent, x, y, extra = {}) => {
+    seats.push({ agent, x, y, w: 44, h: 40, facing: "down", tagY: y + 38, sayY: y - 6, cx: x + 15, aisleY: y + 35, ...extra });
+    bottom = Math.max(bottom, y + 46);
+  };
+
   if (style.layout === "pods") {
     // Pods of four: two face the viewer, two sit opposite with their backs to the viewer.
     team.forEach((agent, i) => {
@@ -697,22 +948,32 @@ function roomLayout(agents, style = roomStyle(0)) {
       const k = i % 4;
       const px = teamX + (pod % 2) * 92 + (k % 2) * 44;
       const py = TEAM_Y + 12 + Math.floor(pod / 2) * 96;
-      if (k < 2) seats.push({ agent, x: px, y: py, w: 44, h: 34, facing: "down", tagY: py - 17, sayY: py - 18 });
-      else seats.push({ agent, x: px, y: py + 34, w: 44, h: 34, facing: "up", tagY: py + 66, sayY: py + 30 });
+      if (k < 2) seats.push({ agent, x: px, y: py, w: 44, h: 34, facing: "down", tagY: py - 17, sayY: py - 18, cx: px + 15, aisleY: py - 17 });
+      else seats.push({ agent, x: px, y: py + 34, w: 44, h: 34, facing: "up", tagY: py + 66, sayY: py + 30, cx: px + 15, aisleY: py + 62 });
       bottom = Math.max(bottom, py + 74);
+    });
+  } else if (style.layout === "stagger") {
+    // Rows of four and three, shifted like bricks.
+    team.forEach((agent, i) => {
+      const k = i % 7;
+      const row = Math.floor(i / 7) * 2 + (k < 4 ? 0 : 1);
+      front(agent, teamX + (k < 4 ? k * SLOT_W : 23 + (k - 4) * SLOT_W), TEAM_Y + row * SLOT_H);
+    });
+  } else if (style.layout === "duo") {
+    // Pairs share one long desk; a plant stands between the pairs.
+    team.forEach((agent, i) => {
+      const k = i % 4;
+      front(agent, teamX + Math.floor(k / 2) * 96 + (k % 2) * 44, TEAM_Y + Math.floor(i / 4) * 50, { pair: k % 2 });
     });
   } else {
     const gapY = style.layout === "bench" ? 50 : SLOT_H;
-    team.forEach((agent, i) => {
-      const x = teamX + (i % 4) * SLOT_W;
-      const y = TEAM_Y + Math.floor(i / 4) * gapY;
-      seats.push({ agent, x, y, w: 44, h: 40, facing: "down", tagY: y + 38, sayY: y - 6 });
-      bottom = Math.max(bottom, y + 46);
-    });
+    team.forEach((agent, i) => front(agent, teamX + (i % 4) * SLOT_W, TEAM_Y + Math.floor(i / 4) * gapY));
   }
-  if (pm) seats.unshift({ agent: pm, x: pmX, y: 42, w: 62, h: 40, facing: "down", wide: true, tagY: 80, sayY: 36 });
+  if (pm) seats.unshift({ agent: pm, x: pmX, y: 42, w: 62, h: 40, facing: "down", wide: true, tagY: 80, sayY: 36, cx: pmX + 24, aisleY: 77 });
   const height = Math.max(160, bottom + 30);
-  return { width: ROOM_W, height, seats, pmX, teamX };
+  // The free strip between the team area and the manager's column: people walk along it.
+  const corridorX = style.pmSide === "right" ? 185 : 59;
+  return { width: ROOM_W, height, seats, pmX, teamX, corridorX, spots: [] };
 }
 
 function floorSvg(kind, W, H) {
@@ -742,38 +1003,56 @@ const WALL_ITEMS = {
   neon: { w: 30, draw: (x) => neonSign(x, 8) },
   plantShelf: { w: 32, draw: (x) => plantShelf(x, 6) },
   clock: { w: 9, draw: (x) => clock(x, 8) },
+  kanban: { w: 36, draw: (x) => kanbanBoard(x, 5) },
+  frames: { w: 34, draw: (x) => pictureFrames(x, 5) },
+  calendar: { w: 16, draw: (x) => wallCalendar(x, 6) },
+  aircon: { w: 28, draw: (x) => airConditioner(x, 5) },
 };
 
+// Things along the bottom wall. Items with an emote are places people visit on a break.
 const FLOOR_ITEMS = {
-  coffee: { w: 18, draw: (x, H) => coffeeMachine(x, H - 16) },
-  cooler: { w: 14, draw: (x, H) => waterCooler(x, H - 22) },
-  vending: { w: 18, draw: (x, H) => vendingMachine(x, H - 20) },
-  aquarium: { w: 28, draw: (x, H) => aquarium(x, H - 20) },
-  arcade: { w: 18, draw: (x, H) => arcade(x, H - 20) },
-  printer: { w: 20, draw: (x, H) => printer(x, H - 20) },
-  beanbags: { w: 26, draw: (x, H) => beanbags(x, H - 13) },
+  coffee: { w: 18, emote: "☕", mug: true, draw: (x, H) => coffeeMachine(x, H - 16) },
+  cooler: { w: 14, emote: "💧", draw: (x, H) => waterCooler(x, H - 22) },
+  vending: { w: 18, emote: "🥤", draw: (x, H) => vendingMachine(x, H - 20) },
+  aquarium: { w: 28, emote: "🐟", draw: (x, H) => aquarium(x, H - 20) },
+  arcade: { w: 18, emote: "🎮", draw: (x, H) => arcade(x, H - 20) },
+  printer: { w: 20, emote: "📄", draw: (x, H) => printer(x, H - 20) },
+  beanbags: { w: 26, emote: "😌", draw: (x, H) => beanbags(x, H - 13) },
   lamp: { w: 11, draw: (x, H) => floorLamp(x, H - 18) },
-  bigPlant: { w: 10, draw: (x, H) => plant(x, H - 18, true) },
+  bigPlant: { w: 10, emote: "🌿", draw: (x, H) => plant(x, H - 18, true) },
+  servers: { w: 16, emote: "🔧", draw: (x, H) => serverRack(x, H - 20) },
+  cat: { w: 20, emote: "🐱", draw: (x, H, style) => officeCat(x + 1, H - 16, style.catColor) },
+  bins: { w: 22, draw: (x, H) => recyclingBins(x, H - 19) },
+  coats: { w: 12, draw: (x, H) => coatRack(x, H - 21) },
 };
 
-function roomSvg(agents, seed = 0) {
+function roomSvg(agents, seed = 0, { sky = skyPhase() } = {}) {
   const style = roomStyle(seed);
   Object.assign(PX, BASE_PX, style.palette.colors);
   try {
     const layout = roomLayout(agents, style);
     const { width: W, height: H, pmX, teamX } = layout;
+    const windowSky = style.palette.night ? "night" : sky;
     let s = floorSvg(style.palette.floor, W, H);
 
-    // Rugs: manager corner and the lounge.
+    // Rugs: manager corner, the lounge and sometimes the team area.
     s += box(pmX - 2, 36, 66, 56, PX.rug, PX.rugEdge);
     const loungeY = Math.max(98, H - 66);
     s += box(pmX + 2, loungeY, 58, H - loungeY - 8, PX.rug, PX.rugEdge);
+    const teamSeats = layout.seats.filter((seat) => !seat.wide);
+    if (style.teamRug && teamSeats.length) {
+      const top = Math.min(...teamSeats.map((seat) => seat.y)) + 10;
+      const bottomY = Math.max(...teamSeats.map((seat) => seat.y + seat.h)) + 2;
+      s += box(teamX - 2, top, 188, bottomY - top, PX.rug, PX.rugEdge) + rect(teamX, top + 2, 184, 1, PX.rugEdge) + rect(teamX, bottomY - 3, 184, 1, PX.rugEdge);
+    }
+    // Door mat.
+    s += box(119, H - 12, 24, 7, shade(PX.rug, -18), PX.rugEdge);
 
     // Back wall: windows and decoration over the team area, a shelf over the manager.
     s += rect(0, 0, W, 30, PX.wall) + rect(0, 26, W, 4, PX.wallDark) + rect(0, 0, W, 3, PX.wallTrim);
     let wx = teamX + 6;
     for (let i = 0; i < style.windows; i++) {
-      s += style.roundWindows ? roundWindow(wx, 7) : windowSvg(wx, 6, 34, 17, style.palette.night);
+      s += style.roundWindows ? roundWindow(wx, 7, windowSky) : windowSvg(wx, 6, 34, 17, windowSky);
       wx += style.roundWindows ? 22 : 42;
     }
     for (const name of style.wallDecor) {
@@ -787,22 +1066,32 @@ function roomSvg(agents, seed = 0) {
 
     // Lounge under the manager's corner.
     s += lounge(style.lounge, pmX, loungeY);
+    (LOUNGE_SPOTS[style.lounge] || []).forEach((spot) => {
+      layout.spots.push({ x: pmX + 2 + spot.dx, y: Math.min(loungeY + spot.dy, H - 30), zone: "lounge", emote: spot.emote, mug: spot.mug });
+    });
 
     // Floor extras along the bottom wall of the team area (the door is in the middle).
     let ex = teamX + 2;
     for (const name of style.extras) {
       const item = FLOOR_ITEMS[name];
       if (ex + item.w > 112 && ex < 148) ex = 150;
-      if (ex + item.w > teamX + 188) break;
-      s += item.draw(ex, H);
+      if (ex + item.w > teamX + 186) continue;
+      s += item.draw(ex, H, style);
+      if (item.emote) layout.spots.push({ x: ex + Math.floor(item.w / 2) - 7, y: H - 46, zone: "floor", emote: item.emote, mug: item.mug });
       ex += item.w + 6;
     }
+    // Stepping out through the door.
+    layout.spots.push({ x: 124, y: H - 24, zone: "door" });
 
     // Desks and staff. Bench desks join into one long table; cubicles get partitions.
     const deskOpts = { desk: style.desk, chair: style.chair };
     layout.seats.forEach((seat) => {
       if (seat.facing === "up") s += workstationBackSvg(seat.agent, seat.x, seat.y, deskOpts);
       else if (style.layout === "bench" && !seat.wide) s += workstationSvg(seat.agent, seat.x, seat.y, { ...deskOpts, deskX: seat.x - 1, deskW: 48 });
+      else if (style.layout === "duo" && !seat.wide) {
+        s += workstationSvg(seat.agent, seat.x, seat.y, { ...deskOpts, deskX: seat.pair ? seat.x - 1 : seat.x + 2, deskW: seat.pair ? 43 : 44 });
+        if (seat.pair && seat.x + 52 < teamX + 150) s += plant(seat.x + 46, seat.y + 26);
+      }
       else s += workstationSvg(seat.agent, seat.x, seat.y, { ...deskOpts, wide: seat.wide });
       if (style.layout === "cubicles" && !seat.wide) {
         s += box(seat.x - 1, seat.y + 14, 3, 22, "#c9d0d6") + box(seat.x + 43, seat.y + 14, 3, 22, "#c9d0d6");
@@ -832,7 +1121,7 @@ function emptyRoomSvg() {
   let s = rect(0, 0, W, H, PX.floor);
   for (let x = 0; x < W; x += 12) s += rect(x, 30, 1, H - 30, PX.floorLine);
   for (let y = 30; y < H; y += 12) s += rect(0, y, W, 1, PX.floorLine);
-  s += rect(0, 0, W, 30, PX.wall) + rect(0, 26, W, 4, PX.wallDark) + windowSvg(110, 6, 40, 17);
+  s += rect(0, 0, W, 30, PX.wall) + rect(0, 26, W, 4, PX.wallDark) + windowSvg(110, 6, 40, 17, skyPhase());
   s += plant(20, 120, true) + plant(226, 120, true);
   return `<svg class="room-svg" viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges" aria-hidden="true">${s}</svg>`;
 }
