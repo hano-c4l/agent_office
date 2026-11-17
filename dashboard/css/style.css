@@ -333,7 +333,14 @@ body:not(.demo) .demo-only { display: none !important; }
 .use-aquarium .item-aquarium .amb-fish, .use-pond .lounge-garden .amb-fish { animation-duration: 2.2s; }
 .use-cat .item-cat .amb-zzz { display: none; }
 .use-cat .item-cat .amb-tail { animation-duration: .5s; }
-.cat-away .item-cat .cat-body { display: none; }
+.use-dog .item-dog .amb-zzz, .use-cat .item-cat .amb-zzz { display: none; }
+.use-dog .item-dog .amb-tail { animation-duration: .3s; }
+.use-band .lounge-band .amb-zzz { animation-duration: .8s; }
+.use-treadmill .item-treadmill .amb-blink { animation-duration: .2s; }
+.use-speaker .item-speaker .amb-blink { animation-duration: .25s; }
+.use-foosball .item-foosball .amb-wiggle { animation-duration: .6s; }
+.use-bird .item-bird .amb-wiggle { animation-duration: .8s; }
+.pet-away .pet-body { display: none; }
 
 /* Scenes on top of the open room: people on a break, tasks flying between desks, confetti. */
 .scene-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
@@ -350,13 +357,24 @@ body:not(.demo) .demo-only { display: none !important; }
 .walker.courier.delivered .walker-parcel { display: none; }
 @keyframes swing { 50% { transform: translate(-2px, -2px); } }
 .npc { position: absolute; }
-.npc.vacuum .walker-svg, .npc.cat .walker-svg, .npc.parcel .walker-svg { overflow: visible; }
-.npc.cat .leg-a, .npc.cat .leg-b { display: none; }
-.npc.cat.walking .leg-s { display: none; }
-.npc.cat.walking .leg-a, .npc.cat.walking .leg-b { display: inline; }
-.npc.cat.walking .leg-a { animation: flap .3s steps(1) infinite; }
-.npc.cat.walking .leg-b { animation: flap .3s steps(1) -.15s infinite; }
-.npc.cat.flip .walker-svg { transform: scaleX(-1); }
+.npc.hit { pointer-events: auto; cursor: pointer; }
+.npc.hit:hover { filter: drop-shadow(0 0 2px #ffd84d) drop-shadow(0 0 2px #ffd84d); }
+.npc.vacuum.flying { animation: hover-bob 1s steps(2) infinite; }
+@keyframes hover-bob { 50% { transform: translateY(-12%); } }
+.walker.play-treadmill .leg-s { display: none; }
+.walker.play-treadmill .leg-a, .walker.play-treadmill .leg-b { display: inline; }
+.walker.play-treadmill .leg-a { animation: flap .3s steps(1) infinite; }
+.walker.play-treadmill .leg-b { animation: flap .3s steps(1) -.15s infinite; }
+.walker.play-treadmill .walker-body, .walker.play-dance .walker-body { animation: breathe .3s steps(1) infinite; }
+.walker.play-dance { animation: dance 1s steps(1) infinite; }
+@keyframes dance { 25% { transform: translateX(-6%); } 75% { transform: translateX(6%); } }
+.npc.vacuum .walker-svg, .npc.pet .walker-svg, .npc.parcel .walker-svg { overflow: visible; }
+.npc.pet .leg-a, .npc.pet .leg-b { display: none; }
+.npc.pet.walking .leg-s { display: none; }
+.npc.pet.walking .leg-a, .npc.pet.walking .leg-b { display: inline; }
+.npc.pet.walking .leg-a { animation: flap .3s steps(1) infinite; }
+.npc.pet.walking .leg-b { animation: flap .3s steps(1) -.15s infinite; }
+.npc.pet.flip .walker-svg { transform: scaleX(-1); }
 .npc.parcel { animation: walker-pop .25s steps(3); }
 .pp-live {
   position: absolute; background: #fff; outline: 1px solid #3a2f3f; border-radius: 50%;
@@ -687,3 +705,16 @@ legend { font-weight: 800; font-size: 12px; padding: 0 4px; }
 /* ---------- the PM's name tag ---------- */
 .tag.pm { box-shadow: 0 0 0 1px #f5c242; }
 .tag.pm b::before { content: "★ "; color: #f5c242; }
+
+/* ---------- room items: click targets, their panel, the desk dice ---------- */
+.item-hit { position: absolute; background: transparent; border: 0; padding: 0; cursor: pointer; pointer-events: auto; border-radius: 4px; }
+.item-hit:hover, .item-hit:focus-visible { outline: 3px dashed rgba(255, 216, 77, .95); outline-offset: -1px; background: rgba(255, 216, 77, .12); }
+.item-avatar { padding: 4px; background: #e9eef0; }
+.item-preview { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.item-emotes { display: flex; gap: 6px; margin: 8px 0 0; font-size: 18px; }
+.item-emotes span { background: #fff; border: 2px solid #3a2f3f; border-radius: 6px; padding: 0 5px; }
+.dice:disabled { opacity: .45; cursor: default; transform: none; }
+.desk-dice { right: auto; left: -8px; display: flex; align-items: center; justify-content: center; }
+.desk-dice svg { width: 16px; height: 13px; image-rendering: pixelated; }
+.desk-line { margin: 0; }
+.desk-line::first-letter { text-transform: uppercase; }

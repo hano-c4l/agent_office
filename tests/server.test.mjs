@@ -10,7 +10,7 @@ import path from "node:path";
 import { checkRequest, hostName } from "../server/http-guard.mjs";
 import { parseAgentFile, serializeAgentFile, StaffStore, isValidId } from "../server/staff-store.mjs";
 import { Scheduler } from "../server/run-controller.mjs";
-import { slugify } from "../server/departments.mjs";
+import { slugify, Department } from "../server/departments.mjs";
 import { guessRole, titleFromId, randomPerson } from "../server/people.mjs";
 import {
   git, isValidRepoUrl, setupNewWorkspace, migrateWorkspace, confirmMigration, releaseToMain,
@@ -137,6 +137,12 @@ test("staff: hire, edit, assistant round trip keeps the identity, dismiss", (t) 
   const renamed = store.randomize("dev_fe");
   assert.equal(renamed.title, "Frontend Developer");
 
+  assert.equal(renamed.deskSeed, 0);
+  const moved = store.randomizeDesk("dev_fe");
+  assert.ok(moved.deskSeed > 0, "a new desk is a new number");
+  assert.equal(moved.name, renamed.name, "a new desk does not change the person");
+  assert.equal(store.randomizeDesk("nobody"), null);
+
   assert.equal(store.dismiss("dev_fe"), true);
   assert.equal(store.get("dev_fe"), null);
   assert.equal(fs.readdirSync(store.dismissedDir).length, 1);
@@ -157,6 +163,22 @@ test("staff: staged agents and skills are installed, bad names are ignored", (t)
   assert.ok(!fs.existsSync(path.join(store.agentsDir, "Not Valid.md")));
   store.ensureAllIdentities();
   assert.equal(store.get("qa").role, "test");
+});
+
+// ---------- room items ----------
+
+test("room: swapped items are kept, checked and cleared by a new room", (t) => {
+  const root = tempDir(t);
+  const dept = new Department(department(root), { scheduler: new Scheduler(), broadcast() {} });
+  dept.setRoomItem("wall.1", "artSea", 1234);
+  dept.setRoomItem("lounge", "band", 7);
+  assert.deepEqual(dept.info.roomItems, { "wall.1": { kind: "artSea", v: 234 }, lounge: { kind: "band", v: 7 } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, ".office", "department.json"), "utf8")).roomItems.lounge, { kind: "band", v: 7 });
+  assert.throws(() => dept.setRoomItem("../x", "artSea", 1), /Unknown room item/);
+  assert.throws(() => dept.setRoomItem("wall.1", "<script>", 1), /Unknown room item/);
+  dept.randomizeRoom();
+  assert.equal(dept.info.roomItems, undefined);
+  assert.ok(Number.isInteger(dept.info.roomSeed));
 });
 
 // ---------- scheduler ----------

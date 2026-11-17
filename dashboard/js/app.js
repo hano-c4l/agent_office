@@ -30,6 +30,7 @@ const state = {
   maxParallelRuns: 2,
   view: null, // department id, or null for the company floor
   selectedId: null,
+  selectedItem: null, // slot of the room item shown in the panel ("wall.0", "lounge", ...)
   detailsOpen: false,
   draft: null,
   proposal: null, // editable copy of the current department's pending proposal
@@ -304,12 +305,17 @@ function applyEvent(d, ev, replay = false) {
 // so CSS animations keep running smoothly between events.
 function syncRoom(el, d, { mini = false } = {}) {
   const sky = skyPhase();
-  const sig = `${d.id}#${roomSeed(d)}#${sky}#` + d.agents.map((a) => `${a.id}:${a.role}:${a.name}:${a.title}:${a.pending}:${JSON.stringify(a.look)}`).join("|");
+  const sig = `${d.id}#${roomSeed(d)}#${sky}#${JSON.stringify(roomItems(d))}#` +
+    d.agents.map((a) => `${a.id}:${a.role}:${a.name}:${a.title}:${a.pending}:${a.deskSeed || 0}:${JSON.stringify(a.look)}`).join("|");
   if (el.dataset.sig !== sig) {
-    const { svg, layout } = roomSvg(d.agents, roomSeed(d), { sky });
+    const { svg, layout } = roomSvg(d.agents, roomSeed(d), { sky, items: roomItems(d) });
     const pct = (v, total) => `${(v / total) * 100}%`;
     el.style.aspectRatio = `${layout.width} / ${layout.height}`;
-    el.innerHTML = svg + `<div class="room-overlay">${layout.seats.map((s) => `
+    // Decoration and furniture can be clicked in the open room; the hit areas lie under the seats.
+    const hits = mini ? "" : layout.items.map((it) => `
+      <button class="item-hit" data-slot="${esc(it.slot)}" title="${esc(it.name)}" aria-label="${esc(it.name)}"
+        style="left:${pct(it.x, layout.width)};top:${pct(it.y, layout.height)};width:${pct(it.w, layout.width)};height:${pct(it.h, layout.height)}"></button>`).join("");
+    el.innerHTML = svg + `<div class="room-overlay">${hits}${layout.seats.map((s) => `
       <button class="seat" data-id="${esc(s.agent.id)}" tabindex="${mini ? -1 : 0}"
         style="left:${pct(s.x, layout.width)};top:${pct(s.y - 8, layout.height)};width:${pct(s.w, layout.width)};height:${pct(s.h + 8, layout.height)}"
         aria-label="${esc(s.agent.name)}, ${esc(s.agent.title)}"></button>
@@ -363,6 +369,12 @@ function cheer(d) {
   d.cheerUntil = Date.now() + CHEER_MS;
   if (state.view === d.id) Scenes.celebrate(d);
   setTimeout(() => renderDept(d), CHEER_MS + 100);
+}
+
+// Single room items the customer swapped: { slot: { kind, v } }.
+function roomItems(d) {
+  const items = d.info && d.info.roomItems;
+  return items && typeof items === "object" ? items : {};
 }
 
 // The room look comes from a seed; older departments use their theme number.
@@ -618,6 +630,7 @@ function renderClientDesk(d) {
 function openDept(id) {
   if (!state.depts.has(id)) return;
   state.view = id;
+  state.selectedItem = null;
   state.selectedId = null;
   state.draft = null;
   state.board = { owner: "all", q: "", showAllDone: false };
@@ -636,6 +649,7 @@ function backToFloor() {
   Scenes.clear();
   $("#roomStage").dataset.sig = "";
   state.view = null;
+  state.selectedItem = null;
   state.selectedId = null;
   $("#panel").classList.remove("open");
   closeProposalModal();
@@ -647,6 +661,7 @@ function backToFloor() {
 
 function openPanel(id, { details = false } = {}) {
   if (state.selectedId !== id) state.panelShowDone = false;
+  state.selectedItem = null;
   state.selectedId = id;
   state.detailsOpen = details;
   state.draft = null;
@@ -656,7 +671,18 @@ function openPanel(id, { details = false } = {}) {
   $("#panel").classList.add("open");
 }
 
+// Shows a room item (a picture, the lounge, the pet, the cleaning robot...) in the panel.
+function openItem(slot) {
+  state.selectedId = null;
+  state.draft = null;
+  state.selectedItem = slot;
+  renderPanel();
+  if (cur()) syncRoom($("#roomStage"), cur());
+  $("#panel").classList.add("open");
+}
+
 function closePanel() {
+  state.selectedItem = null;
   state.selectedId = null;
   state.draft = null;
   $("#panel").classList.remove("open");
@@ -675,6 +701,7 @@ function startDraft() {
 function renderPanel() {
   const panel = $("#panel");
   const d = cur();
+  if (d && state.selectedItem) return renderItemPanel(panel, d);
   const a = d && state.selectedId ? findAgent(d, state.selectedId) : null;
   if (!a) {
     panel.classList.remove("open");
@@ -693,7 +720,8 @@ function renderPanel() {
   panel.innerHTML = `
     <header class="panel-head">
       <div class="avatar-wrap"><div class="avatar">${portraitSvg(a)}</div>
-        <button class="dice" data-dice="${esc(a.id)}" title="New random look and name" aria-label="Give ${esc(a.name)} a new random look and name">🎲</button></div>
+        <button class="dice" data-dice="${esc(a.id)}" title="New random look and name" aria-label="Give ${esc(a.name)} a new random look and name">🎲</button>
+        <button class="dice desk-dice" data-desk-dice="${esc(a.id)}" title="New random desk: shape, computer, drink, personal item" aria-label="Give ${esc(a.name)} a new random desk">${DESK_ICON}</button></div>
       <div>
         <h2>${esc(a.name)}</h2>
         <p>${esc(a.title)} · ${esc(d.info.name)}</p>
@@ -722,6 +750,11 @@ function renderPanel() {
     </section>
 
     <section class="panel-sec">
+      <h3>Desk</h3>
+      <p class="desk-line">${gearSummary(a, roomSeed(d)).map((x) => esc(x)).join(" · ")}</p>
+    </section>
+
+    <section class="panel-sec">
       <h3>Files touched</h3>
       ${a.files.length ? `<ul class="files">${a.files.map((f) => `<li><code>${esc(f)}</code></li>`).join("")}</ul>`
         : `<p class="muted">No files yet.</p>`}
@@ -732,6 +765,101 @@ function renderPanel() {
     </button>
     ${state.detailsOpen ? detailsHtml(a) : ""}
   `;
+}
+
+// A small pixel desk for the "new desk" button.
+const DESK_ICON = `<svg viewBox="0 0 12 10" shape-rendering="crispEdges" aria-hidden="true">
+  <rect x="0" y="2" width="12" height="3" fill="#3a2f3f"/><rect x="1" y="3" width="10" height="1" fill="#dba35a"/>
+  <rect x="1" y="5" width="2" height="5" fill="#3a2f3f"/><rect x="9" y="5" width="2" height="5" fill="#3a2f3f"/>
+  <rect x="4" y="0" width="4" height="2" fill="#5a8be0"/></svg>`;
+
+// The panel for a room item: what it is, what staff do there, who is there now, and a dice to swap it.
+function renderItemPanel(panel, d) {
+  const slot = state.selectedItem;
+  const style = roomStyle(roomSeed(d), roomItems(d));
+  const info = describeItem(style, slot);
+  if (!info) {
+    state.selectedItem = null;
+    panel.classList.remove("open");
+    return;
+  }
+  const choices = swapChoices(style, slot);
+  const here = Scenes.visitors(d, slot).map((id) => findAgent(d, id)).filter(Boolean);
+  panel.innerHTML = `
+    <header class="panel-head">
+      <div class="avatar-wrap"><div class="avatar item-avatar">${itemPreviewSvg(roomSeed(d), roomItems(d), slot)}</div>
+        <button class="dice" data-item-dice="${esc(slot)}" ${choices.length ? "" : "disabled"}
+          title="Swap for another random item" aria-label="Swap ${esc(info.name)} for another random item">🎲</button></div>
+      <div>
+        <h2>${esc(info.name)}</h2>
+        <p>${esc(info.type)} · ${esc(d.info.name)}</p>
+      </div>
+      <button class="icon-btn" id="closePanel" aria-label="Close panel">×</button>
+    </header>
+
+    <section class="panel-sec">
+      <h3>Overview</h3>
+      <p class="current">${esc(info.about)}</p>
+    </section>
+
+    <section class="panel-sec">
+      <h3>What staff do here</h3>
+      <p class="current">${esc(info.does || "Nothing: it is only there to look at.")}</p>
+      ${info.emotes ? `<p class="item-emotes" aria-hidden="true">${info.emotes.map((e) => `<span>${esc(e)}</span>`).join("")}</p>` : ""}
+    </section>
+
+    <section class="panel-sec">
+      <h3>Here now <span class="count">${here.length}</span></h3>
+      ${here.length ? `<ul class="task-list">${here.map((a) => `<li><b>${esc(a.name)}</b> <span class="muted">${esc(a.title)}</span></li>`).join("")}</ul>`
+        : `<p class="muted">Nobody at the moment.</p>`}
+    </section>
+
+    <section class="panel-sec">
+      <h3>Swap</h3>
+      <p class="muted">${choices.length
+        ? `🎲 puts another item in this place (${choices.length} fit here). What staff do here changes with it. 🎲 Room rolls the whole room again.`
+        : "Nothing else fits in this place."}</p>
+    </section>`;
+}
+
+// Puts another random item into a slot of the room.
+async function randomizeItem(slot) {
+  const d = cur();
+  if (!d) return;
+  const style = roomStyle(roomSeed(d), roomItems(d));
+  const choices = swapChoices(style, slot);
+  if (!choices.length) return;
+  const kind = choices[Math.floor(Math.random() * choices.length)];
+  const v = Math.floor(Math.random() * 1000);
+  if (state.live) {
+    try {
+      const info = await api("PUT", `/api/departments/${encodeURIComponent(d.id)}/room/items`, { slot, kind, v });
+      d.info = { ...d.info, ...info };
+    } catch (err) {
+      pushFeed(d, { kind: "system", text: `Could not change the item: ${err.message}` });
+    }
+  } else {
+    d.info = { ...d.info, roomItems: { ...roomItems(d), [slot]: { kind, v } } };
+  }
+  renderAll();
+}
+
+// A new random desk (shape, computer, drink, personal item) for one staff member.
+async function randomizeDesk(id) {
+  const d = cur();
+  const a = findAgent(d, id);
+  if (!a) return;
+  if (state.live) {
+    try {
+      const saved = await api("POST", `/api/departments/${encodeURIComponent(d.id)}/staff/${encodeURIComponent(id)}/desk`);
+      a.deskSeed = saved.deskSeed;
+    } catch (err) {
+      pushFeed(d, { kind: "system", text: `Could not change ${a.name}'s desk: ${err.message}` });
+    }
+  } else {
+    a.deskSeed = 1 + Math.floor(Math.random() * 1e9);
+  }
+  renderAll();
 }
 
 function panelTaskItem(t) {
@@ -896,12 +1024,12 @@ async function randomizeRoom() {
   if (state.live) {
     try {
       const info = await api("POST", `/api/departments/${encodeURIComponent(d.id)}/room/randomize`);
-      d.info = { ...d.info, ...info };
+      d.info = { ...d.info, roomItems: undefined, ...info };
     } catch (err) {
       pushFeed(d, { kind: "system", text: `Could not change the room: ${err.message}` });
     }
   } else {
-    d.info = { ...d.info, roomSeed: Math.floor(Math.random() * 1e9) };
+    d.info = { ...d.info, roomSeed: Math.floor(Math.random() * 1e9), roomItems: undefined };
   }
   renderAll();
 }
@@ -1609,6 +1737,12 @@ function bindEvents() {
     const card = t.closest(".room-card[data-dept]");
     if (card) return openDept(card.dataset.dept);
 
+    const itemDice = t.closest("[data-item-dice]");
+    if (itemDice) return randomizeItem(itemDice.dataset.itemDice);
+    const deskDice = t.closest("[data-desk-dice]");
+    if (deskDice) return randomizeDesk(deskDice.dataset.deskDice);
+    const hit = t.closest("#roomStage [data-slot]");
+    if (hit) return openItem(hit.dataset.slot);
     const dice = t.closest("[data-dice]");
     if (dice) return randomizeAgent(dice.dataset.dice);
     if (t.closest("[data-room-dice]")) return randomizeRoom();
@@ -1722,7 +1856,7 @@ function bindEvents() {
       if (!$("#hireModal").hidden) return closeHire();
       if (!$("#createModal").hidden) return closeCreate();
       if (state.proposal) { state.proposalDismissed.add(state.proposal.key); return closeProposalModal(); }
-      if (state.selectedId) return closePanel();
+      if (state.selectedId || state.selectedItem) return closePanel();
     }
   });
 
@@ -1778,7 +1912,7 @@ function connectLive() {
     if (!state.depts.has(snap.info.id)) state.depts.set(snap.info.id, makeDept(snap));
     if (!state.view) renderFloor();
   });
-  on("department-info", (d, info) => { d.info = { ...d.info, ...info }; });
+  on("department-info", (d, info) => { d.info = { ...d.info, roomItems: undefined, ...info }; });
   on("office-event", (d, ev) => applyEvent(d, ev));
   on("tasks", (d, data) => setTasks(d, data));
   on("staff", (d, staff) => setStaff(d, staff));

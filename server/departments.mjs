@@ -45,6 +45,10 @@ const REGISTRY_FILE = path.join(OFFICE_DIR, "departments.json");
 const REPLAY_EVENTS = 200;
 const MAX_EVENT_LINE = 1024 * 1024;
 const MODELS = new Set(["opus", "sonnet", "haiku"]);
+// Room item slots: "lounge", "shelf", "cabinet", "vacuum", "wall.<n>", "floor.<n>".
+const ROOM_SLOT = /^(lounge|shelf|cabinet|vacuum|(wall|floor)\.\d)$/;
+const MAX_ROOM_ITEMS = 24;
+const isValidRoomKind = (kind) => typeof kind === "string" && /^[A-Za-z][A-Za-z0-9]{0,30}$/.test(kind);
 
 function readJson(file, fallback = null) {
   try {
@@ -80,7 +84,7 @@ function badRequest(message) {
   return err;
 }
 
-class Department {
+export class Department {
   constructor(info, { scheduler, broadcast }) {
     this.info = info;
     this.id = info.id;
@@ -312,6 +316,20 @@ class Department {
   // A new random room look; the dashboard derives layout, furniture and colors from the seed.
   randomizeRoom() {
     this.info.roomSeed = Math.floor(Math.random() * 1e9);
+    // A new room starts without the single items the customer had swapped in the old one.
+    delete this.info.roomItems;
+    try { writeDepartmentFile(this.root, this.info); } catch { /* the workspace may be missing */ }
+    return this.info;
+  }
+
+  // The customer swapped one item of the room (a picture, the lounge, the pet...). The dashboard knows what
+  // exists and what fits; the server only keeps the choice: { slot: { kind, v } }.
+  setRoomItem(slot, kind, variant) {
+    if (!ROOM_SLOT.test(String(slot)) || !isValidRoomKind(kind)) throw badRequest("Unknown room item.");
+    const items = { ...(this.info.roomItems || {}) };
+    if (Object.keys(items).length >= MAX_ROOM_ITEMS && !items[slot]) throw badRequest("Too many changed items. Roll a new room first.");
+    items[slot] = { kind, v: Number.isInteger(variant) ? Math.abs(variant) % 1000 : 0 };
+    this.info.roomItems = items;
     try { writeDepartmentFile(this.root, this.info); } catch { /* the workspace may be missing */ }
     return this.info;
   }
@@ -421,7 +439,7 @@ export class Company {
       info = {
         id: this.uniqueId(openName), name: openName, pmModel: saved.pmModel || pmModel, workspace,
         repo: saved.repo || folder.origin || "", mode: saved.mode || "new", createdAt: saved.createdAt || new Date().toISOString(),
-        theme: Number.isInteger(saved.theme) ? saved.theme : this.pickTheme(), roomSeed: saved.roomSeed,
+        theme: Number.isInteger(saved.theme) ? saved.theme : this.pickTheme(), roomSeed: saved.roomSeed, roomItems: saved.roomItems,
         migration: saved.migration, docFolders: saved.docFolders || [],
       };
       writeDepartmentFile(workspace, info);

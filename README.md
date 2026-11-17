@@ -101,16 +101,26 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
 
 ### Room
 - **Room look**: generated from a seed: desk layout (rows, cubicles, facing pods, long bench, staggered rows, shared
-  desks for two), manager corner on the left or right, lounge (meeting table, sofa and TV, ping-pong, round table,
-  kitchen, reading corner, indoor garden), chair models, wall decoration, floor items (vending machine, aquarium,
-  arcade, printer, server rack, the office cat...) and one of eight color palettes. The floor is one open space: no
-  rugs mark the areas. **🎲 Room** (top left of the room) picks a new look.
-- **Desks differ from person to person**: shape (panel, open legs, trestle, rounded, curved, L-shape, with drawers),
-  width, material (the room's, birch or a glass top), computer (laptop, monitor, side screen, two screens, tablet),
-  drink (mug, tea, takeaway cup, glass, bottle, can, bubble tea, or none) and a personal thing (photo, lamp, plant,
-  books, rubber duck, robot, fan, sticky notes, globe) or the role's own prop.
-- **The PM stands out**: a navy blazer with a gold tie and pin, a headset, a high-backed leather chair, a deep
-  panelled desk with a name plate and two screens, and a gold star on the name tag.
+  desks for two), manager corner on the left or right, one of 10 lounges (meeting table, sofa and TV, ping-pong,
+  round table, kitchen, reading corner, indoor garden, gaming corner, nap pods, band corner), up to five of 40 wall
+  decorations (eight paintings, pin board, roadmap, dartboard, string lights, world clocks, guitar, mirror...), four
+  of 23 floor items (coffee machine, aquarium, arcade, table football, treadmill, massage chair, speaker, snack shelf,
+  the office cat or dog, a bird cage...), a shelf and a cabinet in the manager's corner, a cleaning robot, chair models
+  and one of eight color palettes. The floor is one open space: no rugs mark the areas. **🎲 Room** (top left of the
+  room) picks a new look.
+- **Click any decoration** (a picture, the lounge, a floor item, the manager's shelf or cabinet, the pet or the
+  cleaning robot) to see it in the side panel: what it is, what staff do there, and who is there now. Its **🎲**
+  swaps it for another item that fits the same place; what staff do there changes with it (a sofa to sit on becomes
+  a band corner to play in). Swapped items are saved with the department; **🎲 Room** starts over without them.
+- **Desks differ from person to person**: shape (panel, open legs, trestle, rounded, curved, L-shape on either side,
+  with drawers, two pedestals, hairpin legs, wave front, round end, on wheels, on crates), width, material (the room's,
+  birch or a glass top), computer (laptop, monitor, side screen, two screens, tablet), drink (mug, tea, takeaway cup,
+  glass, bottle, can, bubble tea, or none) and a personal thing (photo, lamp, plant, books, rubber duck, robot, fan,
+  sticky notes, globe) or the role's own prop. The staff panel says what is on the desk; the desk button next to
+  **🎲** gives that person a new random desk.
+- **The PM stands out**: a navy blazer with a gold tie and pin, a headset, an executive desk (panelled, glass on
+  chrome, curved, white lacquer, antique or with a side wing) with a name plate and two screens, a high-backed chair
+  (brown or black leather, a wing chair, white and gold), and a gold star on the name tag.
 - The windows show the real time of day (day, sunset, night), and the furniture moves: fish swim, screens update, the
   coffee machine steams, the cat flicks its tail.
 - **Character states**, each a small scene. People have habits, so the same state looks different from desk to desk:
@@ -131,8 +141,8 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
   ball flies over the table) or the arcade; wait at the coffee machine and come back with a mug; pet the cat; or step
   out through the sliding door. Sometimes two to four people take the break together and chat in the lounge.
   Everybody comes straight back when work arrives.
-- **The room has a life of its own**: a robot vacuum crosses the floor, the cat leaves its cushion for a walk, and a
-  courier brings a parcel to the PM's desk now and then.
+- **The room has a life of its own**: a cleaning robot (vacuum, mop or drone) crosses the floor, the office pet leaves
+  its bed for a walk, and a courier brings a parcel to the PM's desk now and then.
 - The line under the room counts who is doing what. Scenes stop when your system asks for reduced motion.
 - **Client desk**: send a request or reply to the PM. **Messages** holds what you read or answer (your messages, the
   PM's replies, approvals, errors) with "Needs your reply" on the PM's open question; **Activity** holds the team's
