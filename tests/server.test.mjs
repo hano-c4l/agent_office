@@ -82,6 +82,7 @@ test("randomPerson avoids taken names", () => {
     const person = randomPerson(["Linh", "khoa"]);
     assert.ok(!["linh", "khoa"].includes(person.name.toLowerCase()));
     assert.ok(person.look.gender && person.look.hairStyle && person.look.outfit);
+    assert.ok(person.look.accessory && ["short", "normal", "tall"].includes(person.look.build));
   }
 });
 

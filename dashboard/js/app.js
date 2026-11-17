@@ -8,6 +8,12 @@ const STATUS_LABELS = {
   waiting: "Needs you", error: "Error", done: "Done", queued: "Queued", away: "On a break", pending: "Joining",
 };
 const CHEER_MS = 8000;
+const FLASH_MS = 1700;
+// What a tool looks like over somebody's head for a moment.
+const TOOL_FLASH = {
+  Read: "read", Grep: "search", Glob: "search", Write: "write", Edit: "write", MultiEdit: "write", NotebookEdit: "write",
+  Bash: "term", PowerShell: "term", WebSearch: "web", WebFetch: "web",
+};
 const READ_TOOLS = new Set(["Read", "Grep", "Glob", "WebSearch", "WebFetch", "Skill"]);
 const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 const BUBBLE_MS = 7000;
@@ -168,18 +174,30 @@ function setStaff(d, staff) {
   d.agents = staff.map((cfg) => {
     const prev = old.get(cfg.id);
     return prev
-      ? { ...cfg, status: prev.status, actions: prev.actions, files: prev.files, bubble: prev.bubble }
+      ? { ...cfg, status: prev.status, actions: prev.actions, files: prev.files, bubble: prev.bubble, fx: prev.fx, fxUntil: prev.fxUntil }
       : withRuntime(cfg);
   });
 }
 
 function setTasks(d, data) {
   const list = Array.isArray(data) ? data : (data && data.tasks) || [];
+  const before = new Map((d.tasks || []).map((t) => [t.id, t.status]));
+  const known = before.size > 0;
   d.tasks = list.map((t) => ({
     id: String(t.id ?? ""), title: t.title || "", owner: t.owner || "unassigned",
     status: ["todo", "doing", "done"].includes(t.status) ? t.status : "todo",
     progress: Math.max(0, Math.min(100, Number(t.progress) || (t.status === "done" ? 100 : 0))),
   }));
+  // A task that was just finished earns its owner a star.
+  if (known) d.tasks.filter((t) => t.status === "done" && before.get(t.id) !== "done").forEach((t) => flash(d, findAgent(d, t.owner), "star"));
+}
+
+// Shows a short icon over somebody's head (the tool they use, a failed command, a finished task).
+function flash(d, agent, kind) {
+  if (!agent || !agent.actions || !kind) return;
+  agent.fx = kind;
+  agent.fxUntil = Date.now() + FLASH_MS;
+  setTimeout(() => { if (Date.now() >= agent.fxUntil) renderDept(d); }, FLASH_MS + 50);
 }
 
 function showBubble(d, agent, text, replay) {
@@ -227,6 +245,7 @@ function applyEvent(d, ev, replay = false) {
         break;
       }
       setStatus(agent, READ_TOOLS.has(ev.tool) ? "thinking" : "working");
+      if (!replay) flash(d, agent, TOOL_FLASH[ev.tool]);
       const what = ev.file || ev.detail || "";
       addAction(agent, `${ev.tool}${what ? " " + what : ""}`, time);
       if (WRITE_TOOLS.has(ev.tool) || ev.tool === "Bash" || ev.tool === "PowerShell") {
@@ -240,6 +259,7 @@ function applyEvent(d, ev, replay = false) {
     }
     case "PostToolUseFailure": {
       addAction(agent, `${ev.tool} failed`, time);
+      if (!replay) flash(d, agent, "fail");
       break;
     }
     case "SubagentStart": {
@@ -309,12 +329,13 @@ function syncRoom(el, d, { mini = false } = {}) {
     const away = !mini && Scenes.isAway(d, a.id);
     const ws = el.querySelector(`g.ws[data-agent="${CSS.escape(a.id)}"]`);
     if (ws) {
-      const cls = `ws st-${status}${a.pending ? " pending" : ""}${away ? " away" : ""}${ws.classList.contains("back") ? " back" : ""}`;
+      const fx = a.fx && Date.now() < a.fxUntil && !away ? ` fx-on fx-${a.fx}` : "";
+      const cls = `ws st-${status}${a.pending ? " pending" : ""}${away ? " away" : ""}${fx}${ws.classList.contains("back") ? " back" : ""}${ws.classList.contains("boss") ? " boss" : ""}`;
       if (ws.getAttribute("class") !== cls) ws.setAttribute("class", cls);
     }
     const tag = el.querySelector(`[data-tag="${CSS.escape(a.id)}"]`);
     if (tag) {
-      tag.className = `tag tag-${status}${a.pending ? " pending" : ""}${away ? " away" : ""}${state.selectedId === a.id && !mini ? " selected" : ""}`;
+      tag.className = `tag tag-${status}${a.id === "pm" ? " pm" : ""}${a.pending ? " pending" : ""}${away ? " away" : ""}${state.selectedId === a.id && !mini ? " selected" : ""}`;
     }
     const say = el.querySelector(`[data-say="${CSS.escape(a.id)}"]`);
     if (say) {
@@ -849,17 +870,22 @@ function demoLook() {
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
   const gender = pick(["female", "male"]);
   const shirt = pick([null, null, "#e8738a", "#5fb3b3", "#d9b24c", "#7d8fe0", "#c27ac9"]);
+  const hair2 = pick([null, null, null, null, "#ff6fb5", "#6fa3ef", "#5cc28f", "#f5c242"]);
   return {
     gender, skin: pick(["#ffe0c7", "#eac09c", "#d9a57c", "#a8704a"]), hair: pick(["#2b2b2b", "#8a5a2b", "#d9a441", "#6b4f9e", "#e07a5f"]),
     hairStyle: pick(gender === "female"
-      ? ["long", "bob", "bun", "ponytail", "twintails", "braid", "curly", "afro", "wavy", "pixie"]
-      : ["short", "spiky", "side", "buzz", "mohawk", "curly", "afro", "bald", "undercut", "quiff"]),
-    headwear: pick(gender === "female" ? ["none", "none", "beanie", "headband", "beret", "flower"] : ["none", "none", "cap", "beanie", "bandana"]),
+      ? ["long", "bob", "bun", "ponytail", "twintails", "braid", "curly", "afro", "wavy", "pixie", "hime", "buns", "sidetail"]
+      : ["short", "spiky", "side", "buzz", "mohawk", "curly", "afro", "bald", "undercut", "quiff", "bowl", "slick", "topknot", "dreads"]),
+    headwear: pick(gender === "female"
+      ? ["none", "none", "none", "beanie", "headband", "beret", "flower", "catears", "headphones"]
+      : ["none", "none", "none", "cap", "beanie", "bandana", "visor", "headphones"]),
     eyewear: pick(["none", "none", "round", "square", "sunglasses"]),
     eyes: pick(["tall", "dot", "happy", "sleepy", "wide"]), mouth: pick(["small", "smile", "open", "flat"]),
-    outfit: pick(["tshirt", "collar", "hoodie", "sweater", "suit", "overalls", "scarf", "vest", "jersey", "cardigan", "turtleneck"]),
+    outfit: pick(["tshirt", "collar", "hoodie", "sweater", "suit", "overalls", "scarf", "vest", "jersey", "cardigan", "turtleneck", "stripes", "plaid", "polo", "labcoat", "blazer"]),
     detail: pick(gender === "female" ? ["none", "freckles", "earrings", "blush"] : ["none", "beard", "mustache", "freckles", "stubble"]),
-    ...(shirt ? { shirt } : {}),
+    accessory: pick(["none", "none", "none", "tie", "bowtie", "necklace", "lanyard", "pin"]),
+    build: pick(["short", "normal", "normal", "tall"]),
+    ...(shirt ? { shirt } : {}), ...(hair2 ? { hair2 } : {}),
   };
 }
 
@@ -1855,8 +1881,10 @@ function startDemo() {
         setTimeout(() => { applyEvent(d, { hook: "SubagentStart", agent: target.id }); renderDept(d); }, 1800);
         setTimeout(() => { setStatus(pm, "thinking"); renderDept(d); }, 2400);
       } else if (roll < 0.7 && active.length) {
-        const tool = any(["Edit", "Write", "Read", "Grep", "Bash"]);
-        applyEvent(d, { hook: "PreToolUse", tool, agent: any(active).id, file: any(files) });
+        const tool = any(["Edit", "Write", "Read", "Grep", "Bash", "WebSearch"]);
+        const who = any(active).id;
+        applyEvent(d, { hook: "PreToolUse", tool, agent: who, file: any(files) });
+        if (tool === "Bash" && Math.random() < 0.3) setTimeout(() => { applyEvent(d, { hook: "PostToolUseFailure", tool, agent: who }); renderDept(d); }, 1900);
       } else if (roll < 0.88 && active.length > 1) {
         applyEvent(d, { hook: "SubagentStop", agent: any(active).id, text: any(reports) });
       }

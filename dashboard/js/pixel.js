@@ -123,7 +123,10 @@ function seededRandom(seed) {
 
 const HEADWEAR_COLORS = {
   cap: "#d9534f", beanie: "#5a8be0", headband: "#e05a5a", bow: "#e8738a", bandana: "#c0392b", beret: "#b5485d", flower: "#ff8fb1",
+  headphones: "#5cc28f", visor: "#f2a65a",
 };
+const PM_BLAZER = "#2f3a5f";
+const PANTS = "#4a5670";
 
 function lookParts(agent) {
   const look = agent.look || {};
@@ -132,16 +135,48 @@ function lookParts(agent) {
     look, role,
     skin: look.skin || "#ffe0c7",
     hair: look.hair || "#4a3426",
+    hair2: look.hair2 || null,
     shirt: look.shirt || ROLE_SHIRTS[role] || ROLE_SHIRTS.other,
     style: look.hairStyle || "short",
     // Role accessories win over random headwear and eyewear.
     headwear: role === "devops" ? "hardhat" : (look.headwear || "none"),
-    eyewear: role === "sa" ? "round" : (look.eyewear || (look.beard ? "none" : "none")),
+    eyewear: role === "sa" ? "round" : (look.eyewear || "none"),
     eyes: look.eyes || "tall",
     mouth: look.mouth || "small",
     outfit: role === "leader" && (!look.outfit || look.outfit === "tshirt") ? "suit" : (look.outfit || "tshirt"),
     detail: look.detail || (look.beard ? "beard" : "none"),
+    accessory: look.accessory || "none",
+    build: look.build || "normal",
   };
+}
+
+// The colour of the sleeves, for arms drawn apart from the body.
+function sleeveColor(parts) {
+  if (parts.role === "pm") return PM_BLAZER;
+  return { suit: "#3b3f52", blazer: "#6b7280", labcoat: "#f4f4f1" }[parts.outfit] || parts.shirt;
+}
+
+// An open jacket over the shirt (the PM's blazer, or anybody's grey one).
+function drawJacket(p, color, back, { tie = null, pin = false } = {}) {
+  fill(p, 1, 12, 1, 14, shade(color, -14));
+  fill(p, 12, 12, 12, 14, shade(color, -14));
+  if (back) { fill(p, 2, 11, 11, 14, color); return; }
+  fill(p, 2, 11, 4, 14, color);
+  fill(p, 9, 11, 11, 14, color);
+  dots(p, [[5, 13], [5, 14], [8, 13], [8, 14]], color);
+  if (tie) { dots(p, [[5, 11], [8, 11]], PX.paper); fill(p, 6, 12, 7, 14, tie); }
+  if (pin) p.set("3,12", "#f5c242");
+}
+
+function drawAccessory(p, parts) {
+  switch (parts.accessory) {
+    case "tie": fill(p, 6, 12, 7, 13, "#3d6fb0"); break;
+    case "bowtie": dots(p, [[5, 12], [8, 12]], "#c0392b"); dots(p, [[6, 12], [7, 12]], "#8a2a20"); break;
+    case "necklace": dots(p, [[5, 12], [8, 12], [6, 13], [7, 13]], "#f5c242"); break;
+    case "lanyard": dots(p, [[5, 12], [8, 12], [6, 13]], "#5a8be0"); dots(p, [[6, 14], [7, 14], [7, 13]], PX.paper); break;
+    case "pin": p.set("9,12", "#ff6fb5"); break;
+    default: break;
+  }
 }
 
 // Shirt, jacket or other outfit on rows 11-14 (front or back).
@@ -206,19 +241,58 @@ function drawOutfit(p, parts, back = false) {
     case "turtleneck":
       fill(p, back ? 4 : 5, 11, back ? 9 : 8, 11, shade(shirt, 30));
       break;
+    case "stripes":
+      fill(p, 2, 12, 11, 12, PX.paper);
+      fill(p, 2, 14, 11, 14, PX.paper);
+      dots(p, [[1, 13], [12, 13]], PX.paper);
+      break;
+    case "plaid": {
+      const check = shade(shirt, -45);
+      for (let x = 2; x <= 11; x++) for (let y = 12; y <= 14; y++) if ((x + y) % 2 === 0) p.set(`${x},${y}`, check);
+      break;
+    }
+    case "polo": {
+      const trim = shade(shirt, 42);
+      if (back) fill(p, 4, 11, 9, 11, trim);
+      else { dots(p, [[4, 11], [5, 11], [8, 11], [9, 11]], trim); dots(p, [[6, 12], [6, 13]], PX.paper); }
+      dots(p, [[1, 14], [12, 14]], trim);
+      break;
+    }
+    case "labcoat": {
+      const coat = "#f4f4f1";
+      fill(p, 1, 12, 1, 14, "#d7dbdf");
+      fill(p, 12, 12, 12, 14, "#d7dbdf");
+      if (back) fill(p, 2, 11, 11, 14, coat);
+      else { fill(p, 2, 11, 4, 14, coat); fill(p, 9, 11, 11, 14, coat); dots(p, [[10, 12], [10, 13]], "#5a8be0"); }
+      break;
+    }
+    case "blazer":
+      drawJacket(p, "#6b7280", back);
+      break;
     default:
       break;
   }
   if (role === "leader" && !back) { fill(p, 6, 12, 7, 13, "#c0392b"); dots(p, [[6, 14], [7, 14]], "#c0392b"); }
-  if (role === "pm" && !back && outfit === "tshirt") dots(p, [[5, 11], [8, 11]], PX.paper);
+  // The PM always wears a navy blazer with a gold tie and a pin: the boss is easy to spot.
+  if (role === "pm") drawJacket(p, PM_BLAZER, back, { tie: "#d9a441", pin: true });
+  else if (!back && role !== "leader") drawAccessory(p, parts);
 }
 
 // Hair that hangs behind the head and shoulders (drawn before the head).
+// Dyed tips: hair pixels from a row downwards take the second colour.
+function tintTips(p, parts, fromRow) {
+  if (!parts.hair2) return;
+  for (const [key, color] of p) {
+    if (color === parts.hair && Number(key.split(",")[1]) >= fromRow) p.set(key, parts.hair2);
+  }
+}
+
 function drawBackHair(p, parts) {
   const { style, hair } = parts;
-  if (style === "long") { fill(p, 1, 4, 2, 13, hair); fill(p, 11, 4, 12, 13, hair); }
+  if (style === "long" || style === "hime") { fill(p, 1, 4, 2, 13, hair); fill(p, 11, 4, 12, 13, hair); }
   if (style === "bob") { fill(p, 1, 4, 2, 9, hair); fill(p, 11, 4, 12, 9, hair); }
   if (style === "ponytail") { fill(p, 12, 3, 13, 4, hair); fill(p, 13, 5, 13, 10, hair); }
+  if (style === "sidetail") { fill(p, 12, 4, 13, 9, hair); p.set("13,10", hair); }
   if (style === "twintails") { fill(p, 0, 4, 1, 10, hair); fill(p, 12, 4, 13, 10, hair); }
   if (style === "braid") { fill(p, 11, 5, 12, 12, hair); dots(p, [[11, 7], [12, 9], [11, 11]], shade(hair, 30)); }
   if (style === "afro") { fill(p, 0, 2, 1, 8, hair); fill(p, 12, 2, 13, 8, hair); }
@@ -226,6 +300,11 @@ function drawBackHair(p, parts) {
     fill(p, 1, 4, 2, 12, hair); fill(p, 11, 4, 12, 12, hair);
     dots(p, [[0, 6], [13, 6], [0, 9], [13, 9], [0, 12], [13, 12]], hair);
   }
+  if (style === "dreads") {
+    fill(p, 1, 4, 2, 11, hair); fill(p, 11, 4, 12, 11, hair);
+    dots(p, [[1, 6], [2, 9], [12, 6], [11, 9]], shade(hair, 35));
+  }
+  tintTips(p, parts, 9);
 }
 
 function drawHead(p, skin) {
@@ -247,19 +326,25 @@ function drawFrontHair(p, parts) {
     return;
   }
   if (style === "quiff") { fill(p, 4, 0, 9, 1, hair); p.set("10,1", hair); }
-  if (style === "bun") fill(p, 5, 0, 8, 1, hair);
+  if (style === "bun" || style === "topknot") fill(p, style === "bun" ? 5 : 6, 0, style === "bun" ? 8 : 7, 1, hair);
+  if (style === "buns") { fill(p, 2, 0, 4, 1, hair); fill(p, 9, 0, 11, 1, hair); }
   if (style === "spiky") [3, 5, 8, 10].forEach((x) => p.set(`${x},1`, hair));
   if (style === "curly") { [3, 5, 7, 9].forEach((x) => p.set(`${x},1`, hair)); }
+  if (style === "dreads") fill(p, 3, 1, 10, 1, hair);
   fill(p, 3, 2, 10, 2, hair);
   fill(p, 2, 3, 11, 3, hair);
   if (style === "short" || style === "spiky") { fill(p, 2, 4, 5, 4, hair); p.set("2,5", hair); p.set("11,4", hair); p.set("11,5", hair); }
   if (style === "curly") { dots(p, [[2, 4], [4, 4], [9, 4], [11, 4], [2, 5], [11, 5]], hair); }
-  if (style === "bun" || style === "ponytail" || style === "twintails") { fill(p, 2, 4, 4, 4, hair); fill(p, 10, 4, 11, 4, hair); }
+  if (["bun", "buns", "ponytail", "twintails"].includes(style)) { fill(p, 2, 4, 4, 4, hair); fill(p, 10, 4, 11, 4, hair); }
   if (style === "long" || style === "wavy") { fill(p, 2, 4, 4, 4, hair); fill(p, 9, 4, 11, 4, hair); }
-  if (style === "quiff") dots(p, [[2, 4], [11, 4]], hair);
+  if (style === "quiff" || style === "topknot") dots(p, [[2, 4], [11, 4]], hair);
+  if (style === "slick") { dots(p, [[2, 4], [11, 4]], hair); dots(p, [[4, 2], [6, 2], [8, 2], [5, 3], [7, 3]], shade(hair, 45)); }
   if (style === "pixie") { fill(p, 2, 4, 9, 4, hair); dots(p, [[2, 5], [2, 6], [11, 4], [11, 5]], hair); }
-  if (style === "bob") fill(p, 2, 4, 11, 4, hair);
-  if (style === "side" || style === "braid") { fill(p, 2, 4, 8, 4, hair); fill(p, 2, 5, 3, 5, hair); p.set("11,4", hair); }
+  if (style === "bob" || style === "hime" || style === "bowl") fill(p, 2, 4, 11, 4, hair);
+  if (style === "hime") { fill(p, 2, 5, 2, 8, hair); fill(p, 11, 5, 11, 8, hair); }
+  if (style === "bowl") dots(p, [[2, 5], [11, 5]], hair);
+  if (style === "dreads") dots(p, [[2, 4], [3, 4], [5, 4], [8, 4], [10, 4], [11, 4]], hair);
+  if (style === "side" || style === "braid" || style === "sidetail") { fill(p, 2, 4, 8, 4, hair); fill(p, 2, 5, 3, 5, hair); p.set("11,4", hair); }
 }
 
 function drawHeadwear(p, parts, back = false) {
@@ -275,8 +360,20 @@ function drawHeadwear(p, parts, back = false) {
   if (headwear === "bandana") { fill(p, 2, 2, 11, 3, c); dots(p, [[12, 4], [13, 5]], c); }
   if (headwear === "beret") { fill(p, 4, 1, 10, 1, c); fill(p, 2, 2, 12, 3, c); p.set("9,0", shade(c, -35)); }
   if (headwear === "flower") { dots(p, [[10, 1], [9, 2], [11, 2], [10, 3]], c); p.set("10,2", "#ffe08a"); }
+  if (headwear === "visor") { fill(p, 2, 3, 11, 3, c); if (!back) fill(p, 1, 4, 8, 4, shade(c, -30)); }
+  if (headwear === "catears") {
+    dots(p, [[2, 0], [2, 1], [3, 1], [11, 0], [11, 1], [10, 1]], parts.hair);
+    dots(p, [[2, 1], [11, 1]], "#ff8fb1");
+  }
   if (headwear === "bow") { dots(p, [[9, 1], [10, 2], [12, 1], [11, 2], [9, 2], [12, 2]], c); dots(p, [[10, 1], [11, 1]], shade(c, -30)); }
+  if (headwear === "headphones") { fill(p, 3, 1, 10, 1, "#3b3b4f"); fill(p, 1, 5, 1, 7, c); fill(p, 12, 5, 12, 7, c); }
   if (role === "dev") { fill(p, 3, 1, 10, 1, "#3b3b4f"); fill(p, 1, 5, 1, 7, "#e05a5a"); fill(p, 12, 5, 12, 7, "#e05a5a"); }
+  // The PM is always on a call: a headset with a microphone.
+  if (role === "pm") {
+    if (headwear === "none") fill(p, 3, 1, 10, 1, "#2a2433");
+    fill(p, 1, 5, 1, 7, "#2a2433");
+    if (!back) { dots(p, [[2, 8], [3, 9]], "#2a2433"); p.set("4,9", "#f5c242"); }
+  }
 }
 
 // Eye pixels, used for blinking.
@@ -317,11 +414,18 @@ function drawFace(p, parts) {
 }
 
 // Upper body facing the viewer (14 x 15 pixels). Legs are hidden behind the desk.
+// A tall person gets one more row of body (the desk hides the rest).
+function stretchBody(p, parts) {
+  if (parts.build !== "tall") return;
+  for (let x = 0; x <= 13; x++) if (p.has(`${x},14`)) p.set(`${x},15`, p.get(`${x},14`));
+}
+
 function characterPixels(agent) {
   const parts = lookParts(agent);
   const p = new Map();
   drawBackHair(p, parts);
   drawOutfit(p, parts);
+  stretchBody(p, parts);
   drawHead(p, parts.skin);
   drawFrontHair(p, parts);
   drawHeadwear(p, parts);
@@ -335,13 +439,16 @@ function characterBackPixels(agent) {
   const { style, hair, skin } = parts;
   const p = new Map();
   if (style === "twintails") { fill(p, 0, 4, 1, 10, hair); fill(p, 12, 4, 13, 10, hair); }
+  if (style === "sidetail") fill(p, 12, 4, 13, 10, hair);
   if (style === "afro") { fill(p, 0, 2, 13, 8, hair); }
   drawOutfit(p, parts, true);
+  stretchBody(p, parts);
   drawHead(p, skin);
   dots(p, [[2, 6], [11, 6], [2, 7], [11, 7]], shade(skin, -15));
   const covered = !["bald", "buzz", "mohawk", "undercut"].includes(style);
   if (style === "undercut") { fill(p, 3, 1, 10, 4, hair); fill(p, 2, 5, 11, 7, shade(skin, -24)); }
   if (style === "wavy") { fill(p, 1, 4, 12, 12, hair); dots(p, [[0, 6], [13, 6], [0, 9], [13, 9], [0, 12], [13, 12]], hair); }
+  if (style === "dreads") { fill(p, 1, 4, 12, 11, hair); dots(p, [[2, 7], [5, 10], [8, 8], [11, 10]], shade(hair, 35)); }
   if (covered) { fill(p, 3, 1, 10, 2, hair); fill(p, 2, 3, 11, 8, hair); fill(p, 3, 9, 10, 9, hair); }
   if (style === "buzz") fill(p, 2, 2, 11, 7, shade(hair, 20));
   if (style === "mohawk") fill(p, 6, 0, 7, 8, hair);
@@ -349,55 +456,112 @@ function characterBackPixels(agent) {
   if (style === "afro") fill(p, 1, 0, 12, 9, hair);
   if (style === "curly") [3, 5, 7, 9].forEach((x) => p.set(`${x},0`, hair));
   if (style === "bun") fill(p, 5, 0, 8, 1, hair);
-  if (style === "long") fill(p, 2, 9, 11, 13, hair);
-  if (style === "bob") fill(p, 2, 9, 11, 10, hair);
+  if (style === "topknot") fill(p, 6, 0, 7, 1, hair);
+  if (style === "buns") { fill(p, 2, 0, 4, 1, hair); fill(p, 9, 0, 11, 1, hair); }
+  if (style === "long" || style === "hime") fill(p, 2, 9, 11, 13, hair);
+  if (style === "bob" || style === "bowl") fill(p, 2, 9, 11, 10, hair);
   if (style === "ponytail") fill(p, 6, 8, 7, 13, hair);
   if (style === "braid") { fill(p, 6, 8, 7, 14, hair); dots(p, [[6, 10], [7, 12]], shade(hair, 30)); }
+  tintTips(p, parts, 10);
   drawHeadwear(p, parts, true);
   return p;
 }
 
 // A character sprite as SVG; eyelids and the raised arm are separate groups for CSS animation.
+// Mouths for moods (a grin, a frown, a surprised "oh"); CSS shows the one that fits the state.
+function moodSvg(parts, ox, oy) {
+  if (parts.detail === "beard") return "";
+  const base = parts.detail === "stubble" ? shade(parts.skin, -28) : parts.skin;
+  const face = (cls, list, color) => {
+    const m = new Map();
+    fill(m, 5, 9, 8, 10, base);
+    dots(m, list, color);
+    return group(`mood ${cls}`, pixelsToRects(m, ox, oy));
+  };
+  return face("mood-happy", [[5, 9], [6, 9], [7, 9], [8, 9], [6, 10], [7, 10]], "#7a3b3b") +
+    face("mood-worry", [[5, 10], [6, 9], [7, 9], [8, 10]], "#b5535b") +
+    face("mood-oh", [[6, 9], [7, 9], [6, 10], [7, 10]], "#7a3b3b");
+}
+
+// How far a person sits above or below the usual height.
+function buildShift(agent) {
+  return { short: 1, tall: -1 }[(agent.look || {}).build] || 0;
+}
+
+// A character sprite as SVG; eyelids and the raised arm are separate groups for CSS animation.
 function characterSvg(agent, ox, oy, { back = false } = {}) {
   const parts = lookParts(agent);
+  oy += buildShift(agent);
+  const arm = new Map();
+  fill(arm, 12, 5, 13, 11, sleeveColor(parts));
+  fill(arm, 12, 3, 13, 4, parts.skin);
   if (back) {
-    const arm = new Map();
-    fill(arm, 12, 5, 13, 11, parts.shirt);
-    fill(arm, 12, 3, 13, 4, parts.skin);
     return `<g class="body">${pixelsToRects(withOutline(characterBackPixels(agent)), ox, oy)}
       <g class="arm-up">${pixelsToRects(withOutline(arm), ox, oy)}</g></g>`;
   }
   const pixels = withOutline(characterPixels(agent));
   const lids = new Map(eyePixels(parts).map(([x, y]) => [`${x},${y}`, parts.skin]));
-  const arm = new Map();
-  fill(arm, 12, 5, 13, 11, parts.outfit === "suit" ? "#3b3f52" : parts.shirt);
-  fill(arm, 12, 3, 13, 4, parts.skin);
   // An open mouth that flaps while the character talks.
   const talk = new Map();
   fill(talk, 6, 9, 7, 10, "#7a3b3b");
   return `<g class="body">${pixelsToRects(pixels, ox, oy)}
     <g class="lids">${pixelsToRects(lids, ox, oy)}</g>
+    ${moodSvg(parts, ox, oy)}
     <g class="talk-mouth">${pixelsToRects(talk, ox, oy)}</g>
     <g class="arm-up">${pixelsToRects(withOutline(arm), ox, oy)}</g></g>`;
 }
 
 // A standing character with legs, used when somebody leaves the desk and walks through the room.
 // The two leg groups alternate in CSS while the sprite moves.
-function walkerSvg(agent) {
-  const pants = agent.role === "leader" || (agent.look || {}).outfit === "suit" ? "#3b3f52" : "#4a5670";
+function walkerSvg(agent, { carry = "" } = {}) {
+  const parts = lookParts(agent);
+  const pants = agent.role === "leader" || agent.role === "pm" || parts.outfit === "suit" ? "#3b3f52" : PANTS;
+  // Tall people have longer legs, short people shorter ones.
+  const top = 15 + (parts.build === "tall" ? 1 : 0);
+  const len = parts.build === "short" ? -1 : 0;
   const legs = (left, right) => {
     const p = new Map();
-    fill(p, 3, 15, 6, 14 + left, pants);
-    fill(p, 7, 15, 10, 14 + right, pants);
-    fill(p, 3, 15 + left, 6, 15 + left, "#2a2433");
-    fill(p, 7, 15 + right, 10, 15 + right, "#2a2433");
+    fill(p, 3, top, 6, top - 1 + left + len, pants);
+    fill(p, 7, top, 10, top - 1 + right + len, pants);
+    fill(p, 3, top + left + len, 6, top + left + len, "#2a2433");
+    fill(p, 7, top + right + len, 10, top + right + len, "#2a2433");
     return pixelsToRects(withOutline(p));
   };
   const mug = box(11, 9, 5, 5, PX.paper) + rect(13, 10, 2, 1, "#b07d4f");
+  const paddle = box(12, 6, 5, 5, "#e05a5a") + rect(14, 11, 1, 3, PX.woodDark);
+  const parcel = box(3, 9, 9, 7, "#c9955c") + rect(7, 10, 1, 5, "#e8d3a8");
   return `<svg class="walker-svg" viewBox="-1 -1 18 22" shape-rendering="crispEdges" aria-hidden="true">
-    <g class="leg-s">${legs(3, 3)}</g><g class="leg-a">${legs(3, 2)}</g><g class="leg-b">${legs(2, 3)}</g>
-    <g class="walker-body">${pixelsToRects(withOutline(characterPixels(agent)))}</g>
-    <g class="walker-mug">${mug}</g></svg>`;
+    <g class="legs"><g class="leg-s">${legs(3, 3)}</g><g class="leg-a">${legs(3, 2)}</g><g class="leg-b">${legs(2, 3)}</g></g>
+    <g class="walker-body wb-front">${pixelsToRects(withOutline(characterPixels(agent)))}</g>
+    <g class="walker-body wb-back">${pixelsToRects(withOutline(characterBackPixels(agent)))}</g>
+    <g class="walker-mug">${mug}</g><g class="walker-paddle">${paddle}</g>${carry === "parcel" ? `<g class="walker-parcel">${parcel}</g>` : ""}</svg>`;
+}
+
+// The office cat on its feet (two leg frames alternate while it walks).
+function catSpriteSvg(color = "#e8a25c") {
+  const dark = shade(color, -45);
+  const frame = (legs) => {
+    const p = new Map();
+    fill(p, 1, 2, 9, 5, color); fill(p, 8, 0, 11, 3, color);
+    dots(p, [[8, 0], [11, 0]], dark);
+    dots(p, [[0, 0], [0, 1], [0, 2]], dark);
+    p.set("10,2", PX.outline);
+    dots(p, legs, color);
+    return pixelsToRects(withOutline(p));
+  };
+  return `<svg class="walker-svg" viewBox="-1 -1 14 9" shape-rendering="crispEdges" aria-hidden="true">
+    <g class="leg-s">${frame([[2, 6], [8, 6]])}</g><g class="leg-a">${frame([[2, 6], [7, 6]])}</g><g class="leg-b">${frame([[3, 6], [8, 6]])}</g></svg>`;
+}
+
+// A robot vacuum that wanders over the free floor.
+function vacuumSvg() {
+  return `<svg class="walker-svg" viewBox="0 0 10 6" shape-rendering="crispEdges" aria-hidden="true">
+    ${box(0, 1, 10, 5, "#3d424e")}${rect(1, 0, 8, 1, "#5d6470")}${rect(4, 2, 2, 1, "#5cc28f", "amb-blink")}</svg>`;
+}
+
+function parcelSvg() {
+  return `<svg class="walker-svg" viewBox="0 0 9 7" shape-rendering="crispEdges" aria-hidden="true">
+    ${box(0, 0, 9, 7, "#c9955c")}${rect(4, 1, 1, 5, "#e8d3a8")}</svg>`;
 }
 
 // Small sprites that fly between desks: a task on its way to somebody, or a finished report coming back.
@@ -412,7 +576,7 @@ function noteSvg(kind) {
 
 // Square portrait used in the panel and the team proposal.
 function portraitSvg(agent) {
-  return `<svg class="portrait" viewBox="-1 -1 16 17" shape-rendering="crispEdges" aria-hidden="true">
+  return `<svg class="portrait" viewBox="-1 -1 16 18" shape-rendering="crispEdges" aria-hidden="true">
     ${pixelsToRects(withOutline(characterPixels(agent)))}</svg>`;
 }
 
@@ -625,8 +789,8 @@ function officeCat(x, y, color = "#e8a25c") {
   const tail = new Map();
   fill(tail, 12, 5, 13, 6, color); fill(tail, 13, 3, 14, 4, dark);
   return box(x - 1, y + 6, 18, 5, "#c27ac9") + rect(x, y + 7, 16, 1, shade("#c27ac9", 30)) +
-    pixelsToRects(withOutline(p), x, y) + group("amb-tail", pixelsToRects(withOutline(tail), x, y)) +
-    group("amb-zzz", glyph([[0, 0], [1, 0], [2, 0], [1, 1], [0, 2], [1, 2], [2, 2]], x + 2, y - 7, "#ffffff"));
+    group("cat-body", pixelsToRects(withOutline(p), x, y) + group("amb-tail", pixelsToRects(withOutline(tail), x, y)) +
+      group("amb-zzz", glyph([[0, 0], [1, 0], [2, 0], [1, 1], [0, 2], [1, 2], [2, 2]], x + 2, y - 7, "#ffffff")));
 }
 
 function recyclingBins(x, y) {
@@ -659,19 +823,148 @@ const DESK_MODELS = {
   wood: () => ({ top: PX.wood, front: PX.woodFront, edge: PX.woodDark }),
   white: () => ({ top: "#f4f4f1", front: "#d7dbdf", edge: "#aab2bb" }),
   dark: () => ({ top: "#565c6b", front: "#3d424e", edge: "#2b2f38" }),
+  birch: () => ({ top: "#ecd9b0", front: "#cdb382", edge: "#a68c5b" }),
+  walnut: () => ({ top: "#8a5a3c", front: "#6b4129", edge: "#4a2c1a" }),
+  glass: () => ({ top: "#cfeaf5", front: "#9aa9b4", edge: "#76828c" }),
 };
+// What can differ from desk to desk in one room. Each person's set comes from their id and the room seed.
+const DESK_SHAPES = ["panel", "legs", "rounded", "curved", "lshape", "drawer", "trestle", "legs"];
+const DESK_WIDTHS = [34, 38, 40, 42];
+const COMPUTERS = ["laptop", "laptop", "laptopDark", "screen", "side", "dual", "tablet"];
+const DRINKS = ["mug", "mugColor", "tea", "takeaway", "glass", "bottle", "can", "boba", "none"];
+const DESK_ITEMS = ["role", "role", "photo", "lamp", "plant", "cactus", "books", "duck", "robot", "fan", "stickies", "globe"];
+const LID_COLORS = ["#8d96a3", "#cfd6de", "#3d424e", "#e8c7a0"];
+const CUP_COLORS = ["#e8738a", "#5fb3b3", "#f5c242", "#7d8fe0"];
 
-function deskSvg(x, y, w, model) {
+function gearFor(agent, seed = 0) {
+  const h = hashOf(`${agent.id}#${seed}`);
+  const at = (list, shift) => list[(h >>> shift) % list.length];
+  return {
+    shape: at(DESK_SHAPES, 0), width: at(DESK_WIDTHS, 4), computer: at(COMPUTERS, 8), drink: at(DRINKS, 12),
+    item: at(DESK_ITEMS, 16), tint: (h >>> 21) % 4,
+  };
+}
+
+// A desk of the given shape. Returns the drawing and whether the space under the top is open
+// (then the legs of whoever sits there are drawn too).
+function deskShape(x, y, w, model, shape) {
   const c = (DESK_MODELS[model] || DESK_MODELS.wood)();
-  return box(x, y, w, 7, c.top) + rect(x + 1, y + 1, w - 2, 1, shade(c.top, 22)) +
-    box(x, y + 6, w, 6, c.front) + rect(x + 1, y + 10, w - 2, 1, c.edge);
+  const hi = shade(c.top, 22);
+  const top = box(x, y, w, 7, c.top) + rect(x + 1, y + 1, w - 2, 1, hi);
+  const rounded = (rows) => {
+    const p = new Map();
+    rows.forEach(([x0, x1, y0, y1, color]) => fill(p, x0, y0, x1, y1, color));
+    return pixelsToRects(withOutline(p), x + 1, y + 1);
+  };
+  const W = w - 3;
+  switch (shape) {
+    case "legs":
+      return { open: true, svg: box(x + 1, y + 6, 4, 8, c.front) + box(x + w - 5, y + 6, 4, 8, c.front) + rect(x + 5, y + 9, w - 10, 1, c.edge) + top };
+    case "trestle":
+      return { open: true, svg: [x + 2, x + w - 9].map((lx) =>
+        rect(lx, y + 7, 1, 7, c.edge) + rect(lx + 6, y + 7, 1, 7, c.edge) + rect(lx, y + 10, 7, 1, c.edge)).join("") + top };
+    case "drawer":
+      return { open: true, svg: box(x + 1, y + 6, 4, 8, c.front) + box(x + w - 14, y + 6, 13, 8, c.front) +
+        rect(x + w - 11, y + 8, 7, 1, c.edge) + rect(x + w - 11, y + 11, 7, 1, c.edge) + top };
+    case "rounded":
+      return { open: false, svg: rounded([[1, W - 1, 0, 0, c.top], [0, W, 1, 4, c.top], [1, W - 1, 1, 1, hi], [0, W, 5, 9, c.front], [1, W - 1, 10, 10, c.front], [1, W - 1, 8, 8, c.edge]]) };
+    case "curved":
+      return { open: false, svg: rounded([[1, W - 1, 0, 0, c.top], [0, W, 1, 4, c.top], [1, W - 1, 1, 1, hi], [0, W, 5, 6, c.front], [2, W - 2, 7, 8, c.front], [5, W - 5, 9, 10, c.front], [5, W - 5, 10, 10, c.edge]]) };
+    case "lshape":
+      return { open: false, svg: top + box(x, y + 6, w, 6, c.front) + rect(x + 1, y + 10, w - 2, 1, c.edge) +
+        box(x + w - 12, y + 6, 12, 8, c.top) + rect(x + w - 11, y + 6, 10, 1, c.top) + rect(x + w - 11, y + 7, 10, 1, hi) +
+        box(x + w - 12, y + 13, 12, 4, c.front) };
+    case "executive":
+      // The manager's desk: deep, panelled front, gold trim and a name plate.
+      return { open: false, svg: box(x, y, w, 8, c.top) + rect(x + 1, y + 1, w - 2, 1, hi) + box(x, y + 7, w, 10, c.front) +
+        rect(x + 1, y + 8, w - 2, 1, "#d9a441") + [x + 3, x + w - 17].map((px) => box(px, y + 10, 14, 5, shade(c.front, -14), c.edge)).join("") +
+        box(x + Math.floor(w / 2) - 7, y + 10, 14, 5, "#f5c242", "#a77b00") + rect(x + Math.floor(w / 2) - 4, y + 12, 8, 1, "#8a5a2b") };
+    default:
+      return { open: false, svg: top + box(x, y + 6, w, 6, c.front) + rect(x + 1, y + 10, w - 2, 1, c.edge) };
+  }
+}
+
+// Knees, shoes and the chair seat under an open desk.
+function underDesk(cx, deskY) {
+  return rect(cx, deskY + 6, 14, 2, PX.chairDark) + rect(cx + 3, deskY + 7, 3, 5, PANTS) + rect(cx + 8, deskY + 7, 3, 5, PANTS) +
+    rect(cx + 2, deskY + 12, 4, 1, "#2a2433") + rect(cx + 8, deskY + 12, 4, 1, "#2a2433");
+}
+
+function sideMonitor(x, deskY) {
+  return box(x - 1, deskY - 10, 12, 9, "#2a2f3a") + rect(x, deskY - 9, 10, 6, "#17202e") +
+    group("code", rect(x + 1, deskY - 8, 5, 1, "#5cc28f", "k0") + rect(x + 1, deskY - 6, 7, 1, "#6fa3ef", "k1") + rect(x + 1, deskY - 4, 4, 1, "#f5c242", "k0")) +
+    rect(x + 3, deskY - 1, 3, 2, PX.metalDark) + rect(x + 1, deskY + 1, 7, 1, PX.metalDark);
+}
+
+// What stands in front of the person. Everything is in the "laptop" group so an empty (joining) desk can hide it.
+function computerSvg(kind, cx, deskY, tint) {
+  const lid = LID_COLORS[tint % LID_COLORS.length];
+  const sticker = ["#5cc28f", "#f5c242", "#ff6fb5", "#6fa3ef"][tint % 4];
+  const laptop = box(cx + 2, deskY - 3, 10, 5, kind === "laptopDark" ? "#3d424e" : lid) +
+    rect(cx + 6, deskY - 2, 2, 2, kind === "laptopDark" ? "#dff4fc" : sticker);
+  if (kind === "screen") return box(cx, deskY - 5, 14, 6, "#2a2f3a") + rect(cx + 6, deskY - 3, 2, 2, "#5d6470") + rect(cx + 4, deskY + 1, 6, 1, "#5d6470");
+  if (kind === "side") return box(cx + 2, deskY - 2, 10, 3, "#cfd6de") + rect(cx + 3, deskY - 1, 8, 1, "#9aa3ad");
+  if (kind === "tablet") return box(cx + 3, deskY - 3, 8, 5, "#2a2f3a") + rect(cx + 12, deskY - 2, 1, 3, PX.paper);
+  return laptop;
+}
+
+// Something to drink, in the "mug" group; hot drinks steam while their owner is idle.
+function drinkSvg(kind, mx, deskY, tint) {
+  const steam = (top) => group("steam", rect(mx + 1, top - 3, 1, 2, "#ffffff") + rect(mx + 3, top - 5, 1, 2, "#ffffff"));
+  switch (kind) {
+    case "none": return "";
+    case "mugColor": return box(mx, deskY - 3, 5, 5, CUP_COLORS[tint]) + rect(mx + 5, deskY - 2, 1, 2, PX.outline) + steam(deskY - 3);
+    case "tea": return rect(mx - 1, deskY + 1, 7, 1, "#cfd6de") + box(mx, deskY - 2, 5, 4, PX.paper) + rect(mx + 1, deskY - 1, 3, 1, "#b5651d") + steam(deskY - 2);
+    case "takeaway": return box(mx + 1, deskY - 6, 4, 8, PX.paper) + rect(mx + 1, deskY - 6, 4, 1, "#5b3a29") + rect(mx + 2, deskY - 3, 2, 2, "#b07d4f") + steam(deskY - 6);
+    case "glass": return rect(mx + 3, deskY - 8, 1, 4, "#e05a5a") + box(mx + 1, deskY - 5, 4, 7, "#dff4fc") + rect(mx + 2, deskY - 2, 2, 3, "#f2a65a");
+    case "bottle": return box(mx + 1, deskY - 7, 4, 9, "#7fd0ef") + rect(mx + 2, deskY - 9, 2, 2, "#2b6ca3") + rect(mx + 2, deskY - 4, 2, 1, PX.paper);
+    case "can": return box(mx + 1, deskY - 4, 4, 6, "#e05a5a") + rect(mx + 2, deskY - 2, 2, 1, PX.paper);
+    case "boba": return rect(mx + 2, deskY - 8, 1, 4, "#c27ac9") + box(mx + 1, deskY - 5, 4, 7, "#f3e2c7") + rect(mx + 2, deskY, 1, 1, "#5b3a29") + rect(mx + 3, deskY - 1, 1, 1, "#5b3a29");
+    default: return box(mx, deskY - 3, 5, 5, PX.paper) + rect(mx + 5, deskY - 2, 1, 2, PX.outline) + steam(deskY - 3);
+  }
+}
+
+// A personal thing on the desk (or the role's own prop).
+function deskItemSvg(kind, role, x, deskY) {
+  switch (kind) {
+    case "photo": return box(x + 1, deskY - 6, 6, 7, PX.woodFront) + rect(x + 2, deskY - 5, 4, 4, "#bfe3f2") + rect(x + 3, deskY - 3, 2, 2, "#f4a3a3");
+    case "lamp": return rect(x + 2, deskY - 5, 5, 5, "#fff3a6", "desklamp") + rect(x + 1, deskY, 5, 1, PX.metalDark) + rect(x + 3, deskY - 6, 1, 6, PX.metalDark) + box(x + 2, deskY - 9, 6, 4, PX.accent);
+    case "plant": return plant(x, deskY - 7);
+    case "cactus": return rect(x + 2, deskY - 8, 2, 6, "#4f9a5a") + rect(x, deskY - 6, 2, 2, "#4f9a5a") + rect(x + 4, deskY - 5, 2, 2, "#4f9a5a") + box(x, deskY - 3, 6, 4, "#c98a5a");
+    case "books": return box(x, deskY - 2, 8, 3, "#5a8be0") + box(x + 1, deskY - 4, 7, 3, "#e05a5a") + box(x, deskY - 6, 6, 3, "#f5c242");
+    case "duck": {
+      const p = new Map();
+      fill(p, 0, 2, 5, 4, "#f5c242"); fill(p, 3, 0, 5, 2, "#f5c242"); p.set("6,1", "#ee9a48"); p.set("4,1", PX.outline);
+      return pixelsToRects(withOutline(p), x + 1, deskY - 5);
+    }
+    case "robot": return box(x + 1, deskY - 9, 6, 5, "#9aa3ad") + rect(x + 2, deskY - 7, 1, 1, "#5cc28f", "amb-blink") + rect(x + 5, deskY - 7, 1, 1, "#5cc28f", "amb-blink") + box(x + 2, deskY - 5, 4, 5, "#6fa3ef");
+    case "fan": return rect(x + 2, deskY, 4, 1, PX.metalDark) + rect(x + 3, deskY - 3, 2, 3, PX.metalDark) + box(x, deskY - 10, 8, 8, "#dff4fc") +
+      group("amb-fan", rect(x + 3, deskY - 9, 2, 6, PX.metal) + rect(x + 1, deskY - 7, 6, 2, PX.metal)) + rect(x + 3, deskY - 7, 2, 2, PX.metalDark);
+    case "stickies": return box(x, deskY - 3, 5, 5, "#fff36f") + box(x + 3, deskY - 5, 5, 5, "#ff8fb1") + rect(x + 5, deskY - 3, 2, 1, PX.outline);
+    case "globe": return box(x + 1, deskY - 9, 6, 6, "#6fa3ef") + rect(x + 2, deskY - 7, 2, 2, "#7cc35a") + rect(x + 5, deskY - 6, 1, 2, "#7cc35a") + rect(x + 3, deskY - 3, 2, 3, PX.metalDark) + rect(x + 2, deskY, 4, 1, PX.metalDark);
+    default: return deskProp(role, x, deskY - 8);
+  }
 }
 
 // Chair behind a character that faces the viewer.
 function chairBackSvg(cx, y, model) {
   if (model === "stool") return "";
+  if (model === "exec") {
+    // The manager's high-backed leather chair with arm rests.
+    return box(cx - 3, y + 1, 20, 23, "#5b3a29") + rect(cx - 2, y + 2, 18, 2, "#7a4f38") +
+      [[1, 6], [12, 6], [1, 11], [12, 11]].map(([dx, dy]) => rect(cx + dx, y + dy, 1, 1, "#d9a441")).join("") +
+      box(cx - 6, y + 13, 4, 9, "#3d2b1f") + box(cx + 16, y + 13, 4, 9, "#3d2b1f");
+  }
   if (model === "gaming") {
     return box(cx - 2, y + 5, 18, 19, "#2a2433") + rect(cx + 5, y + 6, 4, 17, PX.accent) + box(cx + 2, y + 2, 10, 5, "#2a2433");
+  }
+  if (model === "mesh") {
+    let s = box(cx - 1, y + 7, 16, 17, "#5d6470");
+    for (let i = 0; i < 4; i++) s += rect(cx + 1, y + 9 + i * 3, 12, 1, "#8d96a3");
+    return s;
+  }
+  if (model === "wood") {
+    return box(cx - 1, y + 8, 16, 16, PX.woodFront) + [2, 6, 10].map((dx) => rect(cx + dx, y + 10, 2, 13, PX.wood)).join("");
   }
   return box(cx - 2, y + 9, 18, 15, PX.chair) + rect(cx - 1, y + 10, 16, 2, shade(PX.chair, 25));
 }
@@ -680,6 +973,8 @@ function chairBackSvg(cx, y, model) {
 function chairFrontSvg(cx, y, model) {
   if (model === "stool") return box(cx + 2, y + 10, 10, 4, PX.metal);
   if (model === "gaming") return box(cx - 2, y, 18, 14, "#2a2433") + rect(cx + 5, y + 1, 4, 12, PX.accent);
+  if (model === "mesh") return box(cx - 1, y, 16, 12, "#5d6470") + [2, 5, 8].map((dy) => rect(cx + 1, y + dy, 12, 1, "#8d96a3")).join("") + rect(cx + 5, y + 12, 4, 3, PX.metalDark);
+  if (model === "wood") return box(cx - 1, y, 16, 12, PX.woodFront) + [2, 6, 10].map((dx) => rect(cx + dx, y + 2, 2, 9, PX.wood)).join("");
   return box(cx - 2, y, 18, 12, PX.chair) + rect(cx - 1, y + 1, 16, 2, shade(PX.chair, 25)) + rect(cx + 5, y + 12, 4, 3, PX.metalDark);
 }
 
@@ -696,6 +991,8 @@ function deskProp(role, x, y) {
 function statusIcons(x, y) {
   const bubble = (inner, border = PX.outline, bg = "#ffffff") =>
     box(x, y, 13, 9, bg, border) + rect(x + 3, y + 9, 2, 2, border) + inner;
+  // Single pixels inside (or next to) the bubble.
+  const px = (list, color) => list.map(([dx, dy]) => rect(x + dx, y + dy, 1, 1, color)).join("");
   return `
     <g class="icon icon-think">${bubble(`<rect class="d1" x="${x + 3}" y="${y + 4}" width="1" height="1" fill="${PX.outline}"/>
       <rect class="d2" x="${x + 6}" y="${y + 4}" width="1" height="1" fill="${PX.outline}"/>
@@ -716,34 +1013,63 @@ function statusIcons(x, y) {
       ${group("n2", glyph([[2, 0], [3, 1], [2, 1], [2, 2], [2, 3], [0, 3], [1, 3], [0, 4], [1, 4]], x + 8, y, "#6fa3ef"))}</g>
     <g class="icon icon-sweat">${glyph([[1, 0], [0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2], [1, 3]], x - 15, y + 8, "#7fd0ef")}</g>
     <g class="icon icon-confetti">${[["#e05a5a", -14, 2], ["#f5c242", -9, -3], ["#5cc28f", -3, 1], ["#6fa3ef", 3, -4], ["#a98ae6", 9, 0], ["#ff6fb5", 14, -2]]
-      .map(([c, dx, dy], i) => rect(x + dx, y + dy, 2, 2, c, `c${i % 3}`)).join("")}</g>`;
+      .map(([c, dx, dy], i) => rect(x + dx, y + dy, 2, 2, c, `c${i % 3}`)).join("")}</g>
+    <g class="icon icon-ask">${group("z1", glyph([[0, 0], [1, 0], [2, 0], [2, 1], [1, 2], [1, 4]], x + 2, y + 2, "#f5a623"))}
+      ${group("z2", glyph([[0, 0], [1, 0], [2, 0], [2, 1], [1, 2], [1, 4]], x + 8, y - 1, "#f5a623"))}</g>
+    <g class="icon icon-code">${bubble(px([[4, 3], [3, 4], [4, 5], [6, 5], [7, 3], [9, 3], [10, 4], [9, 5]], "#5cc28f"), "#3d4452", "#1f2633")}</g>
+    <g class="icon icon-wave">${group("z1", px([[3, 19], [4, 20], [3, 21]], "#6fa3ef"))}${group("z2", px([[6, 18], [7, 19], [7, 20], [7, 21], [6, 22]], "#6fa3ef"))}</g>
+    <g class="icon icon-dream">${bubble(px([[4, 2], [5, 2], [7, 2], [8, 2], [3, 3], [4, 3], [5, 3], [6, 3], [7, 3], [8, 3], [9, 3], [4, 4], [5, 4], [6, 4], [7, 4], [8, 4], [5, 5], [6, 5], [7, 5], [6, 6]], "#ff8fb1"))}</g>
+    <g class="icon fx fx-term">${bubble(px([[3, 3], [4, 4], [3, 5]], "#5cc28f") + rect(x + 6, y + 5, 3, 1, "#5cc28f", "amb-blink"), "#3d4452", "#1f2633")}</g>
+    <g class="icon fx fx-search">${bubble(px([[4, 2], [5, 2], [6, 2], [3, 3], [7, 3], [3, 4], [7, 4], [4, 5], [5, 5], [6, 5], [8, 6], [9, 7]], "#2b5ea7"))}</g>
+    <g class="icon fx fx-write">${bubble(px([[8, 2], [7, 3], [6, 4], [5, 5]], "#f5a623") + px([[4, 6]], PX.outline) + rect(x + 3, y + 7, 7, 1, PX.metal))}</g>
+    <g class="icon fx fx-read">${bubble(rect(x + 3, y + 2, 7, 6, "#d7f0ff") + rect(x + 6, y + 2, 1, 6, "#9aa3ad") + rect(x + 4, y + 4, 1, 1, "#2b5ea7") + rect(x + 8, y + 4, 1, 1, "#2b5ea7") + rect(x + 4, y + 6, 1, 1, "#2b5ea7"))}</g>
+    <g class="icon fx fx-web">${bubble(rect(x + 4, y + 2, 5, 6, "#6fa3ef") + rect(x + 3, y + 3, 7, 4, "#6fa3ef") + px([[4, 3], [5, 3], [5, 4], [8, 5], [7, 6]], "#7cc35a"))}</g>
+    <g class="icon fx fx-fail">${bubble(px([[4, 2], [5, 3], [6, 4], [7, 5], [8, 6], [8, 2], [7, 3], [5, 5], [4, 6]], "#c0392b"), "#c2405a", "#ffe3e8")}</g>
+    <g class="icon fx fx-star">${glyph([[2, 0], [1, 1], [2, 1], [3, 1], [0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [1, 3], [2, 3], [3, 3], [1, 4], [3, 4]], x + 4, y + 1, "#f5c242")}</g>`;
 }
 
 // A desk with its chair, the agent, a laptop and a role prop, facing the viewer. Slot: 44 x 40 (wide: 62 x 40).
-function workstationSvg(agent, x, y, { wide = false, desk = "wood", chair = "office", deskX, deskW } = {}) {
+function workstationSvg(agent, x, y, { wide = false, desk = "wood", chair = "office", deskX, deskW, seed = 0 } = {}) {
   const w = wide ? 58 : 40;
-  const dx = deskX ?? x + 2;
-  const dw = deskW ?? w;
+  const gear = gearFor(agent, seed);
+  const joined = deskX !== undefined; // part of a long shared desk
   const cx = x + 2 + Math.floor(w / 2) - 7; // character left edge
   const deskY = y + 22;
+  const dw = joined ? deskW : wide ? w : gear.width;
+  const dx = joined ? deskX : wide ? x + 2 : cx + 7 - Math.floor(dw / 2);
+  const shape = joined ? "panel" : wide ? "executive" : gear.shape;
+  const open = ["legs", "trestle", "drawer"].includes(shape);
+  // Most desks follow the room; some people brought their own, and open frames may carry a glass top.
+  const model = wide ? "walnut" : joined ? desk : open && gear.tint === 2 ? "glass" : gear.tint === 3 ? "birch" : desk;
+  const d = deskShape(dx, deskY, dw, model, shape);
+  const leftX = joined || wide ? x + 4 : dx + 2;
+  const rightX = (joined || wide ? x + w : dx + dw) - 7;
+  const computer = wide ? "dual" : gear.computer;
+  const sideScreen = computer === "side" || computer === "dual";
   const skin = (agent.look && agent.look.skin) || "#ffe0c7";
-  // data-idle picks what this person does when there is no work (coffee, a nap, music, the phone).
+  const height = d.svg && shape === "executive" ? 17 : 12;
+  // data-idle picks this person's habits: what they do without work and how they look when busy.
   return `
-  <g class="ws st-idle" data-agent="${escAttr(agent.id)}" data-idle="${hashOf(agent.id) % 4}">
-    ${rect(dx + 2, deskY + 12, dw - 4, 2, "rgba(90,60,30,.18)")}
-    ${chairBackSvg(cx, y, chair)}
+  <g class="ws st-idle${wide ? " boss" : ""}" data-agent="${escAttr(agent.id)}" data-idle="${hashOf(agent.id) % 6}">
+    ${rect(dx + 2, deskY + height, dw - 4, 2, "rgba(90,60,30,.18)")}
+    ${chairBackSvg(cx, y, wide ? "exec" : chair)}
     ${characterSvg(agent, cx, y + 6)}
     <rect class="glow" x="${cx + 2}" y="${y + 9}" width="10" height="7" fill="#9fe7ff"/>
     <g class="phone">${box(cx + 5, y + 16, 4, 6, "#2a2433")}${rect(cx + 6, y + 17, 2, 3, "#9fe7ff")}</g>
-    ${deskSvg(dx, deskY, dw, desk)}
-    <g class="laptop">${box(cx + 2, deskY - 3, 10, 5, PX.metal)}${rect(cx + 6, deskY - 2, 2, 2, PX.frame)}</g>
+    <g class="readdoc">${box(cx + 3, y + 14, 8, 8, PX.paper)}${rect(cx + 5, y + 16, 4, 1, PX.metal)}${rect(cx + 5, y + 18, 3, 1, PX.metal)}</g>
+    ${d.open ? underDesk(cx, deskY) : ""}
+    ${d.svg}
+    <g class="laptop">${computerSvg(computer, cx, deskY, gear.tint)}${sideScreen ? sideMonitor(wide ? x + 40 : leftX, deskY) : ""}</g>
     <g class="sparks">${rect(cx + 3, deskY - 5, 1, 1, "#5cc28f", "k0")}${rect(cx + 7, deskY - 6, 1, 1, "#6fa3ef", "k1")}${rect(cx + 10, deskY - 5, 1, 1, "#f5c242", "k2")}</g>
+    <g class="flame">${rect(cx + 5, deskY - 6, 4, 3, "#ff8c42")}${rect(cx + 6, deskY - 8, 2, 3, "#f5c242")}${rect(cx + 6, deskY - 5, 2, 2, "#fff3a6")}</g>
+    <g class="smoke">${rect(cx + 4, deskY - 7, 2, 2, "#9aa3ad", "k0")}${rect(cx + 8, deskY - 9, 3, 2, "#c9d0d6", "k1")}${rect(cx + 6, deskY - 12, 2, 2, "#9aa3ad", "k2")}</g>
     <g class="hands">${rect(cx, deskY + 1, 2, 1, skin)}${rect(cx + 12, deskY + 1, 2, 1, skin)}</g>
-    <g class="mug">${box(x + w - 7, deskY - 3, 5, 5, PX.paper)}${rect(x + w - 2, deskY - 2, 1, 2, PX.outline)}
-      <g class="steam">${rect(x + w - 6, deskY - 6, 1, 2, "#ffffff")}${rect(x + w - 4, deskY - 8, 1, 2, "#ffffff")}</g></g>
-    <g class="prop">${deskProp(agent.role, x + 4, deskY - 8)}</g>
-    <g class="movebox">${box(x + 3, deskY - 9, 10, 10, "#c9955c")}${rect(x + 4, deskY - 5, 8, 1, "#a8743d")}${rect(x + 7, deskY - 8, 2, 8, "#e8d3a8")}</g>
-    ${wide ? deskProp("sa", x + 15, deskY - 8) : ""}
+    <g class="mug" style="--sip-x:${cx + 9 - rightX}px">${drinkSvg(gear.drink === "none" && wide ? "mug" : gear.drink, rightX, deskY, gear.tint)}</g>
+    <g class="prop">${sideScreen && !wide ? "" : deskItemSvg(wide ? "role" : gear.item, agent.role, leftX, deskY)}</g>
+    <g class="movebox">${box(leftX - 1, deskY - 9, 10, 10, "#c9955c")}${rect(leftX, deskY - 5, 8, 1, "#a8743d")}${rect(leftX + 3, deskY - 8, 2, 8, "#e8d3a8")}</g>
+    ${wide ? `<g class="prop">${deskItemSvg("books", agent.role, x + 15, deskY)}</g>` : ""}
+    <g class="beacon">${box(rightX - 4, deskY - 6, 4, 6, "#e05a5a")}${rect(rightX - 3, deskY - 5, 2, 2, "#ffd0d9")}</g>
+    <g class="trophy">${box(rightX - 5, deskY - 8, 6, 5, "#f5c242", "#a77b00")}${rect(rightX - 3, deskY - 3, 2, 2, "#a77b00")}${rect(rightX - 4, deskY - 1, 4, 1, "#a77b00")}</g>
     ${statusIcons(cx + 9, y - 6)}
   </g>`;
 }
@@ -753,8 +1079,8 @@ function workstationBackSvg(agent, x, y, { desk = "wood", chair = "office" } = {
   const w = 40;
   const cx = x + 2 + Math.floor(w / 2) - 7;
   return `
-  <g class="ws st-idle back" data-agent="${escAttr(agent.id)}" data-idle="${hashOf(agent.id) % 4}">
-    ${deskSvg(x + 2, y, w, desk)}
+  <g class="ws st-idle back" data-agent="${escAttr(agent.id)}" data-idle="${hashOf(agent.id) % 6}">
+    ${deskShape(x + 2, y, w, desk, "panel").svg}
     ${box(cx + 1, y - 4, 12, 7, PX.metalDark)}<rect class="screen" x="${cx + 2}" y="${y - 3}" width="10" height="5" fill="#9fe7ff"/>
     <g class="code">${rect(cx + 3, y - 2, 5, 1, "#2b5ea7", "k0")}${rect(cx + 3, y, 7, 1, "#22744c", "k1")}</g>
     <rect class="glow" x="${cx + 2}" y="${y - 3}" width="10" height="5" fill="#ffffff"/>
@@ -778,7 +1104,8 @@ function meetingTable(x, y) {
 
 function sofaCorner(x, y) {
   const sofa = PX.accent;
-  return box(x + 6, y - 6, 26, 14, "#2a2433") + rect(x + 8, y - 4, 22, 10, "#3f6fb0") + rect(x + 17, y + 8, 4, 3, PX.metalDark) +
+  return box(x + 6, y - 6, 26, 14, "#2a2433") + rect(x + 8, y - 4, 22, 10, "#3f6fb0", "tv-screen") +
+    rect(x + 10, y - 2, 8, 1, "#9fe7ff", "tv-line") + rect(x + 10, y + 1, 13, 1, "#9fe7ff", "tv-line") + rect(x + 17, y + 8, 4, 3, PX.metalDark) +
     box(x + 9, y + 16, 20, 8, PX.wood) +
     box(x, y + 28, 38, 12, sofa) + rect(x + 1, y + 29, 36, 3, shade(sofa, 25)) + rect(x + 12, y + 32, 1, 7, shade(sofa, -30)) + rect(x + 25, y + 32, 1, 7, shade(sofa, -30));
 }
@@ -786,7 +1113,7 @@ function sofaCorner(x, y) {
 function pingPong(x, y) {
   return box(x, y, 36, 22, "#2f7d4f") + rect(x + 1, y + 10, 34, 2, PX.paper) + rect(x + 17, y + 1, 1, 20, PX.paper) +
     rect(x + 2, y + 22, 2, 4, PX.metalDark) + rect(x + 32, y + 22, 2, 4, PX.metalDark) +
-    box(x + 6, y + 4, 5, 5, "#e05a5a") + box(x + 26, y + 14, 5, 5, "#e05a5a") + rect(x + 20, y + 6, 2, 2, "#ffffff");
+    box(x + 6, y + 4, 5, 5, "#e05a5a") + box(x + 26, y + 14, 5, 5, "#e05a5a") + rect(x + 20, y + 6, 2, 2, "#ffffff", "pp-ball");
 }
 
 function roundTable(x, y) {
@@ -831,7 +1158,7 @@ function gardenCorner(x, y) {
 
 function lounge(kind, x, y) {
   if (kind === "sofa") return sofaCorner(x + 8, y + 6);
-  if (kind === "pingpong") return pingPong(x + 10, y + 14);
+  if (kind === "pingpong") return pingPong(x + 14, y + 14);
   if (kind === "round") return roundTable(x + 8, y + 12);
   if (kind === "kitchen") return kitchen(x + 3, y + 10);
   if (kind === "library") return libraryCorner(x + 3, y + 8);
@@ -840,14 +1167,37 @@ function lounge(kind, x, y) {
 }
 
 // Where people stand when they visit the lounge (offsets from the lounge corner) and what they do there.
+// Places in the lounge, as offsets from the lounge corner. A spot says how somebody uses it:
+// sit (legs hidden), back (seen from behind), show (sprite rows left visible, when furniture hides more),
+// use (a class on the room while somebody is there, so the furniture reacts), play (a game pose).
+const SEAT = { sit: true, show: 15 };
 const LOUNGE_SPOTS = {
-  meeting: [{ dx: 0, dy: 10, emote: "💬" }, { dx: 46, dy: 10, emote: "💬" }],
-  sofa: [{ dx: 0, dy: 14, emote: "📺" }, { dx: 47, dy: 14, emote: "🍿" }],
-  pingpong: [{ dx: 0, dy: 12, emote: "🏓" }, { dx: 47, dy: 12, emote: "🏓" }],
-  round: [{ dx: 1, dy: 0, emote: "💬" }, { dx: 45, dy: 0, emote: "☕" }],
-  kitchen: [{ dx: 8, dy: 18, emote: "☕", mug: true }, { dx: 30, dy: 18, emote: "🍪" }],
-  library: [{ dx: 26, dy: 22, emote: "📖" }],
-  garden: [{ dx: 20, dy: 16, emote: "🌿" }, { dx: 40, dy: 14, emote: "🐟" }],
+  meeting: [
+    { dx: 14, dy: -1, ...SEAT, emotes: ["💬", "📝", "👍"] }, { dx: 30, dy: -1, ...SEAT, emotes: ["💡", "💬", "😄"] },
+    { dx: 14, dy: 26, ...SEAT, back: true, emotes: ["💬", "🤔"] }, { dx: 30, dy: 26, ...SEAT, back: true, emotes: ["👍", "💬"] },
+  ],
+  sofa: [
+    { dx: 11, dy: 24, sit: true, back: true, show: 12, use: "tv", emotes: ["📺", "😄"] },
+    { dx: 30, dy: 24, sit: true, back: true, show: 12, use: "tv", emotes: ["🍿", "📺"] },
+  ],
+  pingpong: [
+    { dx: 1, dy: 15, play: "pingpong", use: "pingpong", emotes: ["🏓"] },
+    { dx: 48, dy: 15, play: "pingpong", use: "pingpong", emotes: ["🏓", "😤"] },
+  ],
+  round: [
+    { dx: 19, dy: 5, ...SEAT, emotes: ["💬", "☕"] }, { dx: 6, dy: 11, ...SEAT, emotes: ["😄", "💬"] },
+    { dx: 33, dy: 11, ...SEAT, emotes: ["💬", "🍪"] }, { dx: 19, dy: 25, ...SEAT, back: true, emotes: ["💬"] },
+  ],
+  kitchen: [
+    { dx: 7, dy: 23, ...SEAT, back: true, use: "coffee", mug: true, emotes: ["⏳", "☕"] },
+    { dx: 25, dy: 23, ...SEAT, back: true, emotes: ["🍪", "💬"] },
+    { dx: 45, dy: 20, emotes: ["🧃"] },
+  ],
+  library: [{ dx: 10, dy: 28, ...SEAT, emotes: ["📖", "🤓"] }, { dx: 33, dy: 10, emotes: ["📚"] }],
+  garden: [
+    { dx: 20, dy: 23, ...SEAT, back: true, use: "pond", emotes: ["🌿", "😌"] },
+    { dx: 32, dy: 23, ...SEAT, back: true, use: "pond", emotes: ["🐟", "💬"] },
+  ],
 };
 
 // ---------- room style ----------
@@ -880,7 +1230,7 @@ const PALETTES = [
 const LAYOUTS = ["rows", "cubicles", "pods", "bench", "stagger", "duo"];
 const LOUNGES = ["meeting", "sofa", "pingpong", "round", "kitchen", "library", "garden"];
 const DESKS = ["wood", "white", "dark"];
-const CHAIRS = ["office", "gaming", "stool"];
+const CHAIRS = ["office", "gaming", "stool", "mesh", "wood"];
 const WALL_DECOR = ["whiteboard", "posters", "screen", "map", "banner", "neon", "plantShelf", "clock", "kanban", "frames", "calendar", "aircon"];
 const FLOOR_EXTRAS = ["coffee", "cooler", "vending", "aquarium", "arcade", "printer", "beanbags", "lamp", "bigPlant", "servers", "cat", "bins", "coats"];
 const PM_SHELVES = ["bookshelf", "trophies", "plantShelf"];
@@ -914,7 +1264,6 @@ function roomStyle(seed) {
     wallDecor: pickMany(rnd, WALL_DECOR, 2),
     extras: pickMany(rnd, FLOOR_EXTRAS, 4),
     pmShelf: pickFrom(rnd, PM_SHELVES),
-    teamRug: rnd() < 0.4,
     catColor: pickFrom(rnd, CAT_COLORS),
   };
 }
@@ -969,7 +1318,7 @@ function roomLayout(agents, style = roomStyle(0)) {
     const gapY = style.layout === "bench" ? 50 : SLOT_H;
     team.forEach((agent, i) => front(agent, teamX + (i % 4) * SLOT_W, TEAM_Y + Math.floor(i / 4) * gapY));
   }
-  if (pm) seats.unshift({ agent: pm, x: pmX, y: 42, w: 62, h: 40, facing: "down", wide: true, tagY: 80, sayY: 36, cx: pmX + 24, aisleY: 77 });
+  if (pm) seats.unshift({ agent: pm, x: pmX, y: 42, w: 62, h: 44, facing: "down", wide: true, tagY: 84, sayY: 36, cx: pmX + 24, aisleY: 82 });
   const height = Math.max(160, bottom + 30);
   // The free strip between the team area and the manager's column: people walk along it.
   const corridorX = style.pmSide === "right" ? 185 : 59;
@@ -1010,18 +1359,20 @@ const WALL_ITEMS = {
 };
 
 // Things along the bottom wall. Items with an emote are places people visit on a break.
+// Things along the bottom wall. Items with emotes are places people visit on a break;
+// "use" names the class the room gets while somebody is there, so the item reacts.
 const FLOOR_ITEMS = {
-  coffee: { w: 18, emote: "☕", mug: true, draw: (x, H) => coffeeMachine(x, H - 16) },
-  cooler: { w: 14, emote: "💧", draw: (x, H) => waterCooler(x, H - 22) },
-  vending: { w: 18, emote: "🥤", draw: (x, H) => vendingMachine(x, H - 20) },
-  aquarium: { w: 28, emote: "🐟", draw: (x, H) => aquarium(x, H - 20) },
-  arcade: { w: 18, emote: "🎮", draw: (x, H) => arcade(x, H - 20) },
-  printer: { w: 20, emote: "📄", draw: (x, H) => printer(x, H - 20) },
-  beanbags: { w: 26, emote: "😌", draw: (x, H) => beanbags(x, H - 13) },
+  coffee: { w: 18, emotes: ["⏳", "☕"], mug: true, draw: (x, H) => coffeeMachine(x, H - 16) },
+  cooler: { w: 14, emotes: ["💧"], draw: (x, H) => waterCooler(x, H - 22) },
+  vending: { w: 18, emotes: ["🪙", "🥤"], draw: (x, H) => vendingMachine(x, H - 20) },
+  aquarium: { w: 28, emotes: ["🐟", "🫧"], draw: (x, H) => aquarium(x, H - 20) },
+  arcade: { w: 18, emotes: ["🎮", "🕹️", "⭐"], play: "arcade", draw: (x, H) => arcade(x, H - 20) },
+  printer: { w: 20, emotes: ["🖨️", "📄"], draw: (x, H) => printer(x, H - 20) },
+  beanbags: { w: 26, seats: [-2, 11], emotes: ["😌", "📱"], draw: (x, H) => beanbags(x, H - 13) },
   lamp: { w: 11, draw: (x, H) => floorLamp(x, H - 18) },
-  bigPlant: { w: 10, emote: "🌿", draw: (x, H) => plant(x, H - 18, true) },
-  servers: { w: 16, emote: "🔧", draw: (x, H) => serverRack(x, H - 20) },
-  cat: { w: 20, emote: "🐱", draw: (x, H, style) => officeCat(x + 1, H - 16, style.catColor) },
+  bigPlant: { w: 10, emotes: ["💧", "🌿"], draw: (x, H) => plant(x, H - 18, true) },
+  servers: { w: 16, emotes: ["🔧", "✅"], draw: (x, H) => serverRack(x, H - 20) },
+  cat: { w: 20, emotes: ["🐱", "💕"], draw: (x, H, style) => officeCat(x + 1, H - 16, style.catColor) },
   bins: { w: 22, draw: (x, H) => recyclingBins(x, H - 19) },
   coats: { w: 12, draw: (x, H) => coatRack(x, H - 21) },
 };
@@ -1033,19 +1384,8 @@ function roomSvg(agents, seed = 0, { sky = skyPhase() } = {}) {
     const layout = roomLayout(agents, style);
     const { width: W, height: H, pmX, teamX } = layout;
     const windowSky = style.palette.night ? "night" : sky;
+    // One open floor: no rugs marking the manager's corner, the team or the lounge. Only a door mat.
     let s = floorSvg(style.palette.floor, W, H);
-
-    // Rugs: manager corner, the lounge and sometimes the team area.
-    s += box(pmX - 2, 36, 66, 56, PX.rug, PX.rugEdge);
-    const loungeY = Math.max(98, H - 66);
-    s += box(pmX + 2, loungeY, 58, H - loungeY - 8, PX.rug, PX.rugEdge);
-    const teamSeats = layout.seats.filter((seat) => !seat.wide);
-    if (style.teamRug && teamSeats.length) {
-      const top = Math.min(...teamSeats.map((seat) => seat.y)) + 10;
-      const bottomY = Math.max(...teamSeats.map((seat) => seat.y + seat.h)) + 2;
-      s += box(teamX - 2, top, 188, bottomY - top, PX.rug, PX.rugEdge) + rect(teamX, top + 2, 184, 1, PX.rugEdge) + rect(teamX, bottomY - 3, 184, 1, PX.rugEdge);
-    }
-    // Door mat.
     s += box(119, H - 12, 24, 7, shade(PX.rug, -18), PX.rugEdge);
 
     // Back wall: windows and decoration over the team area, a shelf over the manager.
@@ -1064,11 +1404,13 @@ function roomSvg(agents, seed = 0, { sky = skyPhase() } = {}) {
     s += { bookshelf: bookshelf(pmX + 28, 6), trophies: trophyShelf(pmX + 28, 8), plantShelf: plantShelf(pmX + 26, 6) }[style.pmShelf];
     s += cabinet(pmX + 6, 15) + plant(pmX + 19, 16);
 
-    // Lounge under the manager's corner.
-    s += lounge(style.lounge, pmX, loungeY);
-    (LOUNGE_SPOTS[style.lounge] || []).forEach((spot) => {
-      layout.spots.push({ x: pmX + 2 + spot.dx, y: Math.min(loungeY + spot.dy, H - 30), zone: "lounge", emote: spot.emote, mug: spot.mug });
+    // Lounge under the manager's desk, with the places where people sit, play or gather.
+    const loungeY = Math.max(102, H - 66);
+    s += group(`item lounge-${style.lounge}`, lounge(style.lounge, pmX, loungeY));
+    (LOUNGE_SPOTS[style.lounge] || []).forEach(({ dx, dy, ...how }) => {
+      layout.spots.push({ ...how, x: pmX + dx, y: loungeY + dy, zone: "lounge" });
     });
+    if (style.lounge === "pingpong") layout.pingpong = { x: pmX + 14, y: loungeY + 14, w: 36, h: 22 };
 
     // Floor extras along the bottom wall of the team area (the door is in the middle).
     let ex = teamX + 2;
@@ -1076,15 +1418,24 @@ function roomSvg(agents, seed = 0, { sky = skyPhase() } = {}) {
       const item = FLOOR_ITEMS[name];
       if (ex + item.w > 112 && ex < 148) ex = 150;
       if (ex + item.w > teamX + 186) continue;
-      s += item.draw(ex, H, style);
-      if (item.emote) layout.spots.push({ x: ex + Math.floor(item.w / 2) - 7, y: H - 46, zone: "floor", emote: item.emote, mug: item.mug });
+      s += group(`item item-${name}`, item.draw(ex, H, style));
+      const how = { zone: "floor", emotes: item.emotes, mug: item.mug, play: item.play, use: name };
+      if (item.seats) item.seats.forEach((dx) => layout.spots.push({ ...how, x: ex + dx, y: H - 24, sit: true, show: 15 }));
+      else if (item.emotes) layout.spots.push({ ...how, x: ex + Math.floor(item.w / 2) - 7, y: H - 46 });
+      if (name === "cat") layout.cat = { x: ex + 1, y: H - 16, color: style.catColor };
       ex += item.w + 6;
     }
     // Stepping out through the door.
-    layout.spots.push({ x: 124, y: H - 24, zone: "door" });
+    layout.door = { x: 124, y: H - 24 };
+    layout.spots.push({ ...layout.door, zone: "door" });
+
+    // The free floor between the desks and the bottom wall: the vacuum, the cat and visitors move here.
+    const teamSeats = layout.seats.filter((seat) => !seat.wide);
+    const lowest = teamSeats.length ? Math.max(...teamSeats.map((seat) => seat.y + seat.h)) + 14 : TEAM_Y + 10;
+    layout.openFloor = { x0: teamX + 4, x1: teamX + 172, y0: Math.min(lowest, H - 42), y1: H - 42 };
 
     // Desks and staff. Bench desks join into one long table; cubicles get partitions.
-    const deskOpts = { desk: style.desk, chair: style.chair };
+    const deskOpts = { desk: style.desk, chair: style.chair, seed };
     layout.seats.forEach((seat) => {
       if (seat.facing === "up") s += workstationBackSvg(seat.agent, seat.x, seat.y, deskOpts);
       else if (style.layout === "bench" && !seat.wide) s += workstationSvg(seat.agent, seat.x, seat.y, { ...deskOpts, deskX: seat.x - 1, deskW: 48 });
@@ -1098,11 +1449,12 @@ function roomSvg(agents, seed = 0, { sky = skyPhase() } = {}) {
       }
     });
 
-    // Walls and corner posts, with a door gap at the bottom.
+    // Walls and corner posts, with a sliding glass door at the bottom.
     const wallColor = PX.post;
     s += rect(0, 0, 3, H, wallColor) + rect(W - 3, 0, 3, H, wallColor) + rect(0, 0, W, 2, wallColor);
     s += rect(0, H - 3, 116, 3, wallColor) + rect(146, H - 3, W - 146, 3, wallColor);
     s += rect(116, H - 2, 30, 2, PX.woodDark);
+    s += rect(117, H - 4, 14, 3, "#bfe6f2", "door-l") + rect(131, H - 4, 14, 3, "#bfe6f2", "door-r");
     [[0, 0], [W - 5, 0], [0, H - 5], [W - 5, H - 5], [112, H - 5], [146, H - 5]].forEach(([x, y]) => {
       s += box(x, y, 5, 5, PX.post, PX.postDark);
     });

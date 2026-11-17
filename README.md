@@ -102,23 +102,37 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
 ### Room
 - **Room look**: generated from a seed: desk layout (rows, cubicles, facing pods, long bench, staggered rows, shared
   desks for two), manager corner on the left or right, lounge (meeting table, sofa and TV, ping-pong, round table,
-  kitchen, reading corner, indoor garden), desk and chair models, wall decoration (whiteboard, kanban board, screen,
-  pictures, calendar, air conditioner...), floor items (vending machine, aquarium, arcade, printer, server rack, the
-  office cat...) and one of eight color palettes. **🎲 Room** (top left of the room) picks a new look.
-  The windows show the real time of day (day, sunset, night), and the furniture moves: fish swim, screens update, the
+  kitchen, reading corner, indoor garden), chair models, wall decoration, floor items (vending machine, aquarium,
+  arcade, printer, server rack, the office cat...) and one of eight color palettes. The floor is one open space: no
+  rugs mark the areas. **🎲 Room** (top left of the room) picks a new look.
+- **Desks differ from person to person**: shape (panel, open legs, trestle, rounded, curved, L-shape, with drawers),
+  width, material (the room's, birch or a glass top), computer (laptop, monitor, side screen, two screens, tablet),
+  drink (mug, tea, takeaway cup, glass, bottle, can, bubble tea, or none) and a personal thing (photo, lamp, plant,
+  books, rubber duck, robot, fan, sticky notes, globe) or the role's own prop.
+- **The PM stands out**: a navy blazer with a gold tie and pin, a headset, a high-backed leather chair, a deep
+  panelled desk with a name plate and two screens, and a gold star on the name tag.
+- The windows show the real time of day (day, sunset, night), and the furniture moves: fish swim, screens update, the
   coffee machine steams, the cat flicks its tail.
-- **Character states**, each a small scene:
-  - **Working**: fast typing, a glowing screen and sparks off the keyboard.
-  - **Thinking**: thought bubble, a slow sway and now and then a light bulb.
-  - **Talking** (delegating): moving mouth and a speech bubble; the task flies as a note to the person who gets it,
-    and their report flies back to the PM.
-  - **Needs you**: raised, waving hand with **!**.
-  - **Idle**: everybody has a habit: coffee, a nap, music or the phone. Now and then somebody leaves the desk for the
-    coffee machine, the lounge, the cat or a walk outside, and comes straight back when work arrives.
+- **Character states**, each a small scene. People have habits, so the same state looks different from desk to desk:
+  - **Working**: fast typing and a glowing screen, with sparks, code in a bubble or a keyboard on fire; a desk lamp lights up.
+  - **Thinking**: thought bubble and a light bulb, floating question marks, or reading a document held up.
+  - **Talking** (delegating): moving mouth, sound waves and a speech bubble; the task flies as a note to the person
+    who gets it, and their report flies back to the PM.
+  - **Needs you**: raised, waving hand with **!**, a red beacon on the desk and a blinking name tag.
+  - **Idle**: coffee (with a sip now and then), a nap, music, the phone, stretching or daydreaming.
   - **Queued**: hourglass, while the department waits for a free run slot.
-  - **Error**: red screen, shaking head, a drop of sweat.
-  - **Delivered**: the whole team cheers under confetti for a moment; the PM keeps the check mark.
+  - **Error**: red screen, smoke from the computer, a worried face and a drop of sweat.
+  - **Delivered**: the whole team cheers under confetti with a grin and a trophy; the PM keeps the check mark.
   - **Joining**: faded, with a moving box on the desk (approved, profile not written yet).
+  - **What they do right now** flashes over the head for a moment: terminal, search, pencil, book or globe for the
+    tool in use, a red cross for a failed command, a star for a finished task.
+- **Breaks use the room**: idle people walk to a place and use it. They sit on the sofa (the TV turns on), at the
+  meeting or round table, on the kitchen stools, the garden bench, the armchair or the beanbags; play ping-pong (a
+  ball flies over the table) or the arcade; wait at the coffee machine and come back with a mug; pet the cat; or step
+  out through the sliding door. Sometimes two to four people take the break together and chat in the lounge.
+  Everybody comes straight back when work arrives.
+- **The room has a life of its own**: a robot vacuum crosses the floor, the cat leaves its cushion for a walk, and a
+  courier brings a parcel to the PM's desk now and then.
 - The line under the room counts who is doing what. Scenes stop when your system asks for reduced motion.
 - **Client desk**: send a request or reply to the PM. **Messages** holds what you read or answer (your messages, the
   PM's replies, approvals, errors) with "Needs your reply" on the PM's open question; **Activity** holds the team's
