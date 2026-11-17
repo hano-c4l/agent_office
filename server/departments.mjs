@@ -10,7 +10,7 @@ import { RunController } from "./run-controller.mjs";
 import { randomPerson } from "./people.mjs";
 import {
   isValidRepoUrl, setupNewWorkspace, migrateWorkspace, releaseToMain, inspectFolder, confirmMigration,
-  readDepartmentFile, writeDepartmentFile, listAgentFiles,
+  readDepartmentFile, writeDepartmentFile, listAgentFiles, officeFilesOutdated, updateOfficeFiles,
 } from "./workspace-setup.mjs";
 
 const THEME_COUNT = 6;
@@ -43,7 +43,12 @@ const HIRE_APPROVED = [
 
 const REGISTRY_FILE = path.join(OFFICE_DIR, "departments.json");
 const REPLAY_EVENTS = 200;
+const MAX_EVENT_LINE = 1024 * 1024;
 const MODELS = new Set(["opus", "sonnet", "haiku"]);
+// Room item slots: "lounge", "shelf", "cabinet", "vacuum", "wall.<n>", "floor.<n>".
+const ROOM_SLOT = /^(lounge|shelf|cabinet|vacuum|(wall|floor)\.\d)$/;
+const MAX_ROOM_ITEMS = 24;
+const isValidRoomKind = (kind) => typeof kind === "string" && /^[A-Za-z][A-Za-z0-9]{0,30}$/.test(kind);
 
 function readJson(file, fallback = null) {
   try {
@@ -79,7 +84,7 @@ function badRequest(message) {
   return err;
 }
 
-class Department {
+export class Department {
   constructor(info, { scheduler, broadcast }) {
     this.info = info;
     this.id = info.id;
@@ -110,7 +115,6 @@ class Department {
       broadcast: this.broadcast,
     });
     this.eventsOffset = fs.existsSync(this.files.events) ? fs.statSync(this.files.events).size : 0;
-    this.partialLine = "";
     this.mtimes = {};
     ["tasks", "proposal", "run"].forEach((k) => this.changed(k));
     this.staffSig = this.store.signature();
@@ -129,9 +133,15 @@ class Department {
     }
   }
 
+  // The department info plus what the dashboard needs to know about the folder right now.
+  publicInfo() {
+    const missing = !this.exists();
+    return { ...this.info, missing, officeOutdated: !missing && officeFilesOutdated(this.root, this.info) };
+  }
+
   snapshot({ withEvents = true } = {}) {
     return {
-      info: { ...this.info, missing: !this.exists() },
+      info: this.publicInfo(),
       staff: this.store.list(),
       helpers: this.store.helpers(),
       tasks: readJson(this.files.tasks, { tasks: [] }),
@@ -200,9 +210,12 @@ class Department {
         const buf = Buffer.alloc(size - this.eventsOffset);
         fs.readSync(fd, buf, 0, buf.length, this.eventsOffset);
         fs.closeSync(fd);
-        this.eventsOffset = size;
-        const lines = (this.partialLine + buf.toString("utf8")).split("\n");
-        this.partialLine = lines.pop();
+        // Only complete lines are read: a line (or a multi-byte character) that is still being written
+        // stays in the file for the next poll.
+        const end = buf.lastIndexOf(10);
+        if (end < 0 && buf.length > MAX_EVENT_LINE) this.eventsOffset = size; // not a line: skip it
+        const lines = end < 0 ? [] : buf.subarray(0, end).toString("utf8").split("\n");
+        if (end >= 0) this.eventsOffset += end + 1;
         lines.filter(Boolean).forEach((line) => {
           let ev;
           try { ev = JSON.parse(line); } catch { return; }
@@ -237,7 +250,9 @@ class Department {
       err.status = 404;
       throw err;
     }
-    const next = { ...current, members: body.members || current.members, status: body.status || current.status };
+    const status = ["pending", "approved", "rejected"].includes(body.status) ? body.status : current.status;
+    const members = Array.isArray(body.members) ? body.members.filter((m) => m && typeof m === "object") : current.members;
+    const next = { ...current, members: Array.isArray(members) ? members : [], status };
     if (next.status === "approved") {
       next.approvedAt = next.approvedAt || new Date().toISOString();
       // The dashboard records who joins (name, look, title, model). The PM writes the agent files.
@@ -301,6 +316,20 @@ class Department {
   // A new random room look; the dashboard derives layout, furniture and colors from the seed.
   randomizeRoom() {
     this.info.roomSeed = Math.floor(Math.random() * 1e9);
+    // A new room starts without the single items the customer had swapped in the old one.
+    delete this.info.roomItems;
+    try { writeDepartmentFile(this.root, this.info); } catch { /* the workspace may be missing */ }
+    return this.info;
+  }
+
+  // The customer swapped one item of the room (a picture, the lounge, the pet...). The dashboard knows what
+  // exists and what fits; the server only keeps the choice: { slot: { kind, v } }.
+  setRoomItem(slot, kind, variant) {
+    if (!ROOM_SLOT.test(String(slot)) || !isValidRoomKind(kind)) throw badRequest("Unknown room item.");
+    const items = { ...(this.info.roomItems || {}) };
+    if (Object.keys(items).length >= MAX_ROOM_ITEMS && !items[slot]) throw badRequest("Too many changed items. Roll a new room first.");
+    items[slot] = { kind, v: Number.isInteger(variant) ? Math.abs(variant) % 1000 : 0 };
+    this.info.roomItems = items;
     try { writeDepartmentFile(this.root, this.info); } catch { /* the workspace may be missing */ }
     return this.info;
   }
@@ -310,6 +339,12 @@ class Department {
     const result = await releaseToMain(this.root);
     this.info.lastReleaseAt = new Date().toISOString();
     return result;
+  }
+
+  // Installs the current hooks, /office skill and CLAUDE.md section into a department created with an older version.
+  async updateOffice() {
+    if (this.runner.state.busy) throw new Error("The PM is working. Update the office files when the team is idle.");
+    return updateOfficeFiles(this.root, this.info);
   }
 }
 
@@ -404,7 +439,7 @@ export class Company {
       info = {
         id: this.uniqueId(openName), name: openName, pmModel: saved.pmModel || pmModel, workspace,
         repo: saved.repo || folder.origin || "", mode: saved.mode || "new", createdAt: saved.createdAt || new Date().toISOString(),
-        theme: Number.isInteger(saved.theme) ? saved.theme : this.pickTheme(), roomSeed: saved.roomSeed,
+        theme: Number.isInteger(saved.theme) ? saved.theme : this.pickTheme(), roomSeed: saved.roomSeed, roomItems: saved.roomItems,
         migration: saved.migration, docFolders: saved.docFolders || [],
       };
       writeDepartmentFile(workspace, info);

@@ -1,0 +1,12 @@
+{
+  "name": "agent-office",
+  "version": "0.3.0",
+  "private": true,
+  "description": "A virtual software company made of Claude Code agents, with a pixel-art dashboard.",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server/office-server.mjs",
+    "test": "node --test tests/"
+  }
+}

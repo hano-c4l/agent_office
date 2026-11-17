@@ -10,6 +10,7 @@ import { isValidId, roleCatalog } from "./staff-store.mjs";
 import { listFolders, inspectFolder } from "./workspace-setup.mjs";
 import { Scheduler, runnerConfig } from "./run-controller.mjs";
 import { Company } from "./departments.mjs";
+import { checkRequest } from "./http-guard.mjs";
 
 const PORT = Number(process.argv[2] || process.env.PORT || 5178);
 const MAX_BODY = 1024 * 1024;
@@ -102,6 +103,10 @@ async function handleDepartment(req, res, dept, parts) {
       const agent = dept.store.randomize(sub);
       return agent ? send(res, 200, agent) : send(res, 404, { error: "Not found" });
     }
+    if (req.method === "POST" && action === "desk") {
+      const agent = dept.store.randomizeDesk(sub);
+      return agent ? send(res, 200, agent) : send(res, 404, { error: "Not found" });
+    }
     if (req.method === "POST" && action === "helper") {
       const body = await readBody(req);
       dept.store.setHelper(sub, Boolean(body.helper));
@@ -130,33 +135,50 @@ async function handleDepartment(req, res, dept, parts) {
   }
 
   if (section === "room" && sub === "randomize" && req.method === "POST") {
-    const info = dept.randomizeRoom();
+    dept.randomizeRoom();
     company.save();
-    broadcast("department-info", { dept: dept.id, data: info });
-    return send(res, 200, info);
+    broadcast("department-info", { dept: dept.id, data: dept.publicInfo() });
+    return send(res, 200, dept.publicInfo());
+  }
+
+  if (section === "room" && sub === "items" && req.method === "PUT") {
+    const body = await readBody(req);
+    dept.setRoomItem(body.slot, body.kind, body.v);
+    company.save();
+    broadcast("department-info", { dept: dept.id, data: dept.publicInfo() });
+    return send(res, 200, dept.publicInfo());
   }
 
   if (section === "migration" && sub === "confirm" && req.method === "POST") {
     const result = await dept.confirmMigration();
     company.save();
-    broadcast("department-info", { dept: dept.id, data: dept.info });
+    broadcast("department-info", { dept: dept.id, data: dept.publicInfo() });
     return send(res, 200, result);
   }
 
   if (section === "release" && req.method === "POST") {
     const result = await dept.release();
     company.save();
-    broadcast("department-info", { dept: dept.id, data: dept.info });
+    broadcast("department-info", { dept: dept.id, data: dept.publicInfo() });
     return send(res, 200, result);
+  }
+
+  if (section === "office" && sub === "update" && req.method === "POST") {
+    const result = await dept.updateOffice();
+    const info = dept.publicInfo();
+    broadcast("department-info", { dept: dept.id, data: info });
+    return send(res, 200, { ...result, info });
   }
 
   return send(res, 404, { error: "Unknown API route" });
 }
 
 async function handleApi(req, res, url) {
-  const parts = url.pathname.split("/").slice(2).map(decodeURIComponent);
-  const [resource, id, ...rest] = parts;
+  const denied = checkRequest(req);
+  if (denied) return send(res, denied.status, { error: denied.error });
   try {
+    const parts = url.pathname.split("/").slice(2).map(decodeURIComponent);
+    const [resource, id, ...rest] = parts;
     if (resource === "stream" && req.method === "GET") return openStream(req, res);
     if (resource === "state" && req.method === "GET") return send(res, 200, snapshot());
 
@@ -190,7 +212,12 @@ async function handleApi(req, res, url) {
 }
 
 function serveStatic(req, res, url) {
-  const rel = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+  let rel;
+  try {
+    rel = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+  } catch {
+    return send(res, 400, "Bad request", "text/plain");
+  }
   const file = path.resolve(DASHBOARD_DIR, "." + rel);
   if (!file.startsWith(DASHBOARD_DIR + path.sep)) return send(res, 403, "Forbidden", "text/plain");
   fs.readFile(file, (err, data) => {
@@ -217,3 +244,13 @@ setInterval(() => clients.forEach((res) => res.write(": ping\n\n")), 20000);
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`Agent Office dashboard: http://localhost:${PORT} (${company.list().length} departments)`);
 });
+
+// Stop the PM processes with the server, so no Claude run keeps working (and spending) unseen.
+function shutdown() {
+  company.list().forEach((d) => d.runner.stop());
+  clients.forEach((res) => res.end());
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 1500).unref();
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

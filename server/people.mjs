@@ -13,14 +13,24 @@ const NAMES = {
 
 // Shapes, not colors: hair, headwear, eyewear, eyes, mouth, outfit and face details.
 const HAIR_STYLES = {
-  female: ["long", "bob", "bun", "ponytail", "twintails", "braid", "curly", "afro", "short"],
-  male: ["short", "spiky", "side", "buzz", "mohawk", "curly", "afro", "bald", "long"],
+  female: ["long", "bob", "bun", "ponytail", "twintails", "braid", "curly", "afro", "short", "wavy", "pixie", "hime", "buns", "sidetail"],
+  male: ["short", "spiky", "side", "buzz", "mohawk", "curly", "afro", "bald", "long", "undercut", "quiff", "bowl", "slick", "topknot", "dreads"],
 };
-const HEADWEAR = { female: ["none", "none", "none", "beanie", "headband", "bow", "cap"], male: ["none", "none", "none", "cap", "beanie", "bandana"] };
+const HEADWEAR = {
+  female: ["none", "none", "none", "none", "none", "beanie", "headband", "bow", "cap", "beret", "flower", "catears", "headphones"],
+  male: ["none", "none", "none", "none", "none", "cap", "beanie", "bandana", "beret", "visor", "headphones"],
+};
 const EYEWEAR = ["none", "none", "none", "round", "square", "sunglasses"];
 const EYES = ["tall", "dot", "happy", "sleepy", "wide"];
 const MOUTHS = ["small", "smile", "open", "flat"];
-const OUTFITS = ["tshirt", "collar", "hoodie", "sweater", "suit", "overalls", "scarf"];
+const OUTFITS = [
+  "tshirt", "collar", "hoodie", "sweater", "suit", "overalls", "scarf", "vest", "jersey", "cardigan", "turtleneck",
+  "stripes", "plaid", "polo", "labcoat", "blazer",
+];
+const ACCESSORIES = ["none", "none", "none", "tie", "bowtie", "necklace", "lanyard", "pin"];
+const BUILDS = ["short", "normal", "normal", "tall"];
+// Dyed hair tips, for a few people.
+const HAIR_TIPS = [null, null, null, null, null, "#ff6fb5", "#6fa3ef", "#5cc28f", "#f5c242"];
 const DETAILS = { female: ["none", "none", "freckles", "earrings", "blush"], male: ["none", "none", "beard", "mustache", "freckles", "stubble"] };
 const SKINS = ["#ffe0c7", "#f8d5b5", "#eac09c", "#f6cfa8", "#ffe7d1", "#d9a57c", "#c68a5e", "#a8704a"];
 const HAIRS = ["#2b2b2b", "#3d2b1f", "#5b3a29", "#8a5a2b", "#b5651d", "#d9a441", "#6b4f9e", "#e07a5f", "#1f2a44", "#9aa3ad"];
@@ -40,18 +50,22 @@ export function randomPerson(taken = []) {
 
 export function randomLook(gender = Math.random() < 0.5 ? "female" : "male", shirt = pick(SHIRTS)) {
   const hairStyle = pick(HAIR_STYLES[gender]);
+  const tips = pick(HAIR_TIPS);
   return {
     gender,
     skin: pick(SKINS),
     hair: pick(HAIRS),
     hairStyle,
-    headwear: hairStyle === "afro" || hairStyle === "mohawk" ? "none" : pick(HEADWEAR[gender]),
+    headwear: ["afro", "mohawk", "quiff", "buns", "topknot"].includes(hairStyle) ? "none" : pick(HEADWEAR[gender]),
     eyewear: pick(EYEWEAR),
     eyes: pick(EYES),
     mouth: pick(MOUTHS),
     outfit: pick(OUTFITS),
     detail: pick(DETAILS[gender]),
+    accessory: pick(ACCESSORIES),
+    build: pick(BUILDS),
     ...(shirt ? { shirt } : {}),
+    ...(tips ? { hair2: tips } : {}),
   };
 }
 

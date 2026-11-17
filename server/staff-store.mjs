@@ -148,6 +148,7 @@ export class StaffStore {
         missingSkills: skills.filter((s) => !this.hasSkill(s)),
         prompt: body,
         pending: false,
+        deskSeed: m.deskSeed || 0,
       });
     }
     // Approved members whose agent file the PM has not written yet.
@@ -156,7 +157,7 @@ export class StaffStore {
       staff.set(id, {
         id, name: m.name || id, title: m.title || titleFromId(id), role: m.role || guessRole(id), look: m.look || {},
         model: m.model || "inherit", description: m.description || "", tools: m.tools || [], skills: m.skills || [],
-        missingSkills: [], prompt: "", pending: true,
+        missingSkills: [], prompt: "", pending: true, deskSeed: m.deskSeed || 0,
       });
     }
     const order = Object.keys(meta);
@@ -230,14 +231,11 @@ export class StaffStore {
   setHelper(id, helper) {
     if (!isValidId(id)) throw new Error(`Invalid agent id: ${id}`);
     const meta = this.readMeta();
-    if (helper) {
-      meta[id] = { helper: true };
-      this.writeMeta(meta);
-    } else {
-      delete meta[id];
-      this.writeMeta(meta);
-      this.ensureIdentity(id);
-    }
+    // The name and look are kept, so a person who comes back to the staff is the same person.
+    const { helper: _wasHelper, ...identity } = meta[id] || {};
+    meta[id] = helper ? { ...identity, helper: true } : identity;
+    this.writeMeta(meta);
+    if (!helper) this.ensureIdentity(id);
   }
 
   // Gives a staff member a new random name and look (title and role stay).
@@ -248,6 +246,15 @@ export class StaffStore {
     delete others[id];
     const person = randomPerson(this.takenNames(others));
     meta[id] = { ...(meta[id] || {}), name: person.name, look: person.look };
+    this.writeMeta(meta);
+    return this.get(id);
+  }
+
+  // Gives a staff member another desk: the dashboard draws the desk and what is on it from this number.
+  randomizeDesk(id) {
+    const meta = this.readMeta();
+    if (!meta[id] && !this.has(id)) return null;
+    meta[id] = { ...(meta[id] || {}), deskSeed: 1 + Math.floor(Math.random() * 1e9) };
     this.writeMeta(meta);
     return this.get(id);
   }

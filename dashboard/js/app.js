@@ -5,7 +5,14 @@
 
 const STATUS_LABELS = {
   idle: "Idle", thinking: "Thinking", working: "Working", talking: "Talking",
-  waiting: "Needs you", error: "Error", done: "Done",
+  waiting: "Needs you", error: "Error", done: "Done", queued: "Queued", away: "On a break", pending: "Joining",
+};
+const CHEER_MS = 8000;
+const FLASH_MS = 1700;
+// What a tool looks like over somebody's head for a moment.
+const TOOL_FLASH = {
+  Read: "read", Grep: "search", Glob: "search", Write: "write", Edit: "write", MultiEdit: "write", NotebookEdit: "write",
+  Bash: "term", PowerShell: "term", WebSearch: "web", WebFetch: "web",
 };
 const READ_TOOLS = new Set(["Read", "Grep", "Glob", "WebSearch", "WebFetch", "Skill"]);
 const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
@@ -23,6 +30,7 @@ const state = {
   maxParallelRuns: 2,
   view: null, // department id, or null for the company floor
   selectedId: null,
+  selectedItem: null, // slot of the room item shown in the panel ("wall.0", "lounge", ...)
   detailsOpen: false,
   draft: null,
   proposal: null, // editable copy of the current department's pending proposal
@@ -136,8 +144,10 @@ function needsYou(d) {
 
 function displayStatus(d, a) {
   const r = d.runner || {};
+  // Right after a delivery the whole team celebrates.
+  if (d.cheerUntil && Date.now() < d.cheerUntil && !a.pending) return "done";
   if (a.id === "pm") {
-    if (r.busy) return r.waitingSlot ? "idle" : (a.status === "idle" ? "thinking" : a.status);
+    if (r.busy) return r.waitingSlot ? "queued" : (a.status === "idle" ? "thinking" : a.status);
     if (needsYou(d)) return "waiting";
     if (r.lastError) return "error";
     if (d.run && d.run.status === "done") return "done";
@@ -165,18 +175,30 @@ function setStaff(d, staff) {
   d.agents = staff.map((cfg) => {
     const prev = old.get(cfg.id);
     return prev
-      ? { ...cfg, status: prev.status, actions: prev.actions, files: prev.files, bubble: prev.bubble }
+      ? { ...cfg, status: prev.status, actions: prev.actions, files: prev.files, bubble: prev.bubble, fx: prev.fx, fxUntil: prev.fxUntil }
       : withRuntime(cfg);
   });
 }
 
 function setTasks(d, data) {
   const list = Array.isArray(data) ? data : (data && data.tasks) || [];
+  const before = new Map((d.tasks || []).map((t) => [t.id, t.status]));
+  const known = before.size > 0;
   d.tasks = list.map((t) => ({
     id: String(t.id ?? ""), title: t.title || "", owner: t.owner || "unassigned",
     status: ["todo", "doing", "done"].includes(t.status) ? t.status : "todo",
     progress: Math.max(0, Math.min(100, Number(t.progress) || (t.status === "done" ? 100 : 0))),
   }));
+  // A task that was just finished earns its owner a star.
+  if (known) d.tasks.filter((t) => t.status === "done" && before.get(t.id) !== "done").forEach((t) => flash(d, findAgent(d, t.owner), "star"));
+}
+
+// Shows a short icon over somebody's head (the tool they use, a failed command, a finished task).
+function flash(d, agent, kind) {
+  if (!agent || !agent.actions || !kind) return;
+  agent.fx = kind;
+  agent.fxUntil = Date.now() + FLASH_MS;
+  setTimeout(() => { if (Date.now() >= agent.fxUntil) renderDept(d); }, FLASH_MS + 50);
 }
 
 function showBubble(d, agent, text, replay) {
@@ -220,9 +242,11 @@ function applyEvent(d, ev, replay = false) {
         if (target) addAction(target, `Task from ${who}: ${ev.text || ""}`, time);
         showBubble(d, agent, `@${target ? target.name : ev.target}: ${ev.text || ""}`, replay);
         pushFeed(d, { kind: "msg", from: id, to: target ? target.id : ev.target, text: ev.text || "(new task)", time });
+        if (!replay && target) Scenes.note(d, id, target.id, "task");
         break;
       }
       setStatus(agent, READ_TOOLS.has(ev.tool) ? "thinking" : "working");
+      if (!replay) flash(d, agent, TOOL_FLASH[ev.tool]);
       const what = ev.file || ev.detail || "";
       addAction(agent, `${ev.tool}${what ? " " + what : ""}`, time);
       if (WRITE_TOOLS.has(ev.tool) || ev.tool === "Bash" || ev.tool === "PowerShell") {
@@ -236,6 +260,7 @@ function applyEvent(d, ev, replay = false) {
     }
     case "PostToolUseFailure": {
       addAction(agent, `${ev.tool} failed`, time);
+      if (!replay) flash(d, agent, "fail");
       break;
     }
     case "SubagentStart": {
@@ -246,6 +271,7 @@ function applyEvent(d, ev, replay = false) {
     case "SubagentStop": {
       setStatus(agent, "idle");
       addAction(agent, "Reported back to the PM", time);
+      if (!replay && agent) Scenes.note(d, id, "pm", "report");
       if (ev.text) {
         showBubble(d, agent, ev.text, replay);
         pushFeed(d, { kind: "msg", from: id, to: "pm", text: ev.text, time });
@@ -278,12 +304,18 @@ function applyEvent(d, ev, replay = false) {
 // Builds the room once per staff layout, then only updates classes and overlays,
 // so CSS animations keep running smoothly between events.
 function syncRoom(el, d, { mini = false } = {}) {
-  const sig = `${roomSeed(d)}#` + d.agents.map((a) => `${a.id}:${a.role}:${a.name}:${a.title}:${a.pending}:${JSON.stringify(a.look)}`).join("|");
+  const sky = skyPhase();
+  const sig = `${d.id}#${roomSeed(d)}#${sky}#${JSON.stringify(roomItems(d))}#` +
+    d.agents.map((a) => `${a.id}:${a.role}:${a.name}:${a.title}:${a.pending}:${a.deskSeed || 0}:${JSON.stringify(a.look)}`).join("|");
   if (el.dataset.sig !== sig) {
-    const { svg, layout } = roomSvg(d.agents, roomSeed(d));
+    const { svg, layout } = roomSvg(d.agents, roomSeed(d), { sky, items: roomItems(d) });
     const pct = (v, total) => `${(v / total) * 100}%`;
     el.style.aspectRatio = `${layout.width} / ${layout.height}`;
-    el.innerHTML = svg + `<div class="room-overlay">${layout.seats.map((s) => `
+    // Decoration and furniture can be clicked in the open room; the hit areas lie under the seats.
+    const hits = mini ? "" : layout.items.map((it) => `
+      <button class="item-hit" data-slot="${esc(it.slot)}" title="${esc(it.name)}" aria-label="${esc(it.name)}"
+        style="left:${pct(it.x, layout.width)};top:${pct(it.y, layout.height)};width:${pct(it.w, layout.width)};height:${pct(it.h, layout.height)}"></button>`).join("");
+    el.innerHTML = svg + `<div class="room-overlay">${hits}${layout.seats.map((s) => `
       <button class="seat" data-id="${esc(s.agent.id)}" tabindex="${mini ? -1 : 0}"
         style="left:${pct(s.x, layout.width)};top:${pct(s.y - 8, layout.height)};width:${pct(s.w, layout.width)};height:${pct(s.h + 8, layout.height)}"
         aria-label="${esc(s.agent.name)}, ${esc(s.agent.title)}"></button>
@@ -294,14 +326,22 @@ function syncRoom(el, d, { mini = false } = {}) {
       ${d.agents.length ? "" : `<div class="room-empty">No staff yet</div>`}</div>
       ${mini ? "" : `<button class="room-dice" data-room-dice title="New random room look: layout, furniture, decoration" aria-label="Randomize the room look">🎲 Room</button>`}`;
     el.dataset.sig = sig;
+    // Walks, flying tasks and confetti only play in the open room.
+    if (!mini) Scenes.attach(el, d, layout, () => { if (cur()) renderRoomScene(cur()); });
   }
+  if (!mini) Scenes.sync(d, (a) => displayStatus(d, a));
   d.agents.forEach((a) => {
     const status = displayStatus(d, a);
+    const away = !mini && Scenes.isAway(d, a.id);
     const ws = el.querySelector(`g.ws[data-agent="${CSS.escape(a.id)}"]`);
-    if (ws) ws.setAttribute("class", `ws st-${status}${a.pending ? " pending" : ""}`);
+    if (ws) {
+      const fx = a.fx && Date.now() < a.fxUntil && !away ? ` fx-on fx-${a.fx}` : "";
+      const cls = `ws st-${status}${a.pending ? " pending" : ""}${away ? " away" : ""}${fx}${ws.classList.contains("back") ? " back" : ""}${ws.classList.contains("boss") ? " boss" : ""}`;
+      if (ws.getAttribute("class") !== cls) ws.setAttribute("class", cls);
+    }
     const tag = el.querySelector(`[data-tag="${CSS.escape(a.id)}"]`);
     if (tag) {
-      tag.className = `tag tag-${status}${a.pending ? " pending" : ""}${state.selectedId === a.id && !mini ? " selected" : ""}`;
+      tag.className = `tag tag-${status}${a.id === "pm" ? " pm" : ""}${a.pending ? " pending" : ""}${away ? " away" : ""}${state.selectedId === a.id && !mini ? " selected" : ""}`;
     }
     const say = el.querySelector(`[data-say="${CSS.escape(a.id)}"]`);
     if (say) {
@@ -309,6 +349,32 @@ function syncRoom(el, d, { mini = false } = {}) {
       if (a.bubble && say.textContent !== a.bubble) say.textContent = a.bubble;
     }
   });
+}
+
+// The room stage and the line under it that counts who is doing what.
+function renderRoomScene(d) {
+  syncRoom($("#roomStage"), d);
+  const counts = {};
+  d.agents.forEach((a) => {
+    const key = a.pending ? "pending" : Scenes.isAway(d, a.id) ? "away" : displayStatus(d, a);
+    counts[key] = (counts[key] || 0) + 1;
+  });
+  const order = ["waiting", "error", "working", "thinking", "talking", "queued", "done", "idle", "away", "pending"];
+  $("#statusStrip").innerHTML = order.filter((k) => counts[k]).map((k) =>
+    `<span class="pill pill-${k}"><b>${counts[k]}</b> ${esc(STATUS_LABELS[k].toLowerCase())}</span>`).join("");
+}
+
+// The whole team cheers for a moment when a project is delivered.
+function cheer(d) {
+  d.cheerUntil = Date.now() + CHEER_MS;
+  if (state.view === d.id) Scenes.celebrate(d);
+  setTimeout(() => renderDept(d), CHEER_MS + 100);
+}
+
+// Single room items the customer swapped: { slot: { kind, v } }.
+function roomItems(d) {
+  const items = d.info && d.info.roomItems;
+  return items && typeof items === "object" ? items : {};
 }
 
 // The room look comes from a seed; older departments use their theme number.
@@ -394,7 +460,9 @@ function renderRoomView() {
   $("#roomName").textContent = info.name;
   $("#roomMeta").innerHTML = [
     `<span title="Workspace">📁 <code>${esc(info.workspace)}</code></span>`,
-    info.repo ? `<span title="Repository">🔗 <a href="${esc(info.repo.replace(/\.git$/, ""))}" target="_blank" rel="noopener">${esc(info.repo)}</a></span>` : `<span class="muted">No remote repository</span>`,
+    !info.repo ? `<span class="muted">No remote repository</span>`
+      : /^https:\/\//.test(info.repo) ? `<span title="Repository">🔗 <a href="${esc(info.repo.replace(/\.git$/, ""))}" target="_blank" rel="noopener">${esc(info.repo)}</a></span>`
+        : `<span title="Repository">🔗 <code>${esc(info.repo)}</code></span>`,
     info.missing ? `<span class="err">The workspace folder is missing.</span>` : "",
   ].join("");
   $("#roomBar").style.width = p + "%";
@@ -408,6 +476,8 @@ function renderRoomView() {
     $("#migrationText").innerHTML = `The office setup is on <code>${esc(migration.branch)}</code>. Check it (team, overview), then confirm to merge it into <code>preview</code>.`;
     $("#confirmMigrationBtn").disabled = Boolean(d.runner.busy);
   }
+  $("#officeBanner").hidden = !info.officeOutdated || state.demo;
+  $("#updateOfficeBtn").disabled = Boolean(d.runner.busy);
   const helpers = d.helpers || [];
   $("#helpersStrip").hidden = !helpers.length;
   $("#helpersStrip").innerHTML = helpers.length ? `<span class="muted">Assistants (no tasks):</span>` + helpers.map((h) =>
@@ -415,7 +485,7 @@ function renderRoomView() {
       <button class="btn small" data-make-staff="${esc(h.id)}">Move to staff</button></span>`).join("") : "";
   $("#releaseBtn").hidden = state.demo;
   $("#removeDeptBtn").hidden = state.demo;
-  syncRoom($("#roomStage"), d);
+  renderRoomScene(d);
   renderBoard(d);
   renderClientDesk(d);
   renderFeed(d);
@@ -560,6 +630,7 @@ function renderClientDesk(d) {
 function openDept(id) {
   if (!state.depts.has(id)) return;
   state.view = id;
+  state.selectedItem = null;
   state.selectedId = null;
   state.draft = null;
   state.board = { owner: "all", q: "", showAllDone: false };
@@ -575,7 +646,10 @@ function openDept(id) {
 }
 
 function backToFloor() {
+  Scenes.clear();
+  $("#roomStage").dataset.sig = "";
   state.view = null;
+  state.selectedItem = null;
   state.selectedId = null;
   $("#panel").classList.remove("open");
   closeProposalModal();
@@ -587,6 +661,7 @@ function backToFloor() {
 
 function openPanel(id, { details = false } = {}) {
   if (state.selectedId !== id) state.panelShowDone = false;
+  state.selectedItem = null;
   state.selectedId = id;
   state.detailsOpen = details;
   state.draft = null;
@@ -596,7 +671,18 @@ function openPanel(id, { details = false } = {}) {
   $("#panel").classList.add("open");
 }
 
+// Shows a room item (a picture, the lounge, the pet, the cleaning robot...) in the panel.
+function openItem(slot) {
+  state.selectedId = null;
+  state.draft = null;
+  state.selectedItem = slot;
+  renderPanel();
+  if (cur()) syncRoom($("#roomStage"), cur());
+  $("#panel").classList.add("open");
+}
+
 function closePanel() {
+  state.selectedItem = null;
   state.selectedId = null;
   state.draft = null;
   $("#panel").classList.remove("open");
@@ -615,6 +701,7 @@ function startDraft() {
 function renderPanel() {
   const panel = $("#panel");
   const d = cur();
+  if (d && state.selectedItem) return renderItemPanel(panel, d);
   const a = d && state.selectedId ? findAgent(d, state.selectedId) : null;
   if (!a) {
     panel.classList.remove("open");
@@ -633,7 +720,8 @@ function renderPanel() {
   panel.innerHTML = `
     <header class="panel-head">
       <div class="avatar-wrap"><div class="avatar">${portraitSvg(a)}</div>
-        <button class="dice" data-dice="${esc(a.id)}" title="New random look and name" aria-label="Give ${esc(a.name)} a new random look and name">🎲</button></div>
+        <button class="dice" data-dice="${esc(a.id)}" title="New random look and name" aria-label="Give ${esc(a.name)} a new random look and name">🎲</button>
+        <button class="dice desk-dice" data-desk-dice="${esc(a.id)}" title="New random desk: shape, computer, drink, personal item" aria-label="Give ${esc(a.name)} a new random desk">${DESK_ICON}</button></div>
       <div>
         <h2>${esc(a.name)}</h2>
         <p>${esc(a.title)} · ${esc(d.info.name)}</p>
@@ -662,6 +750,11 @@ function renderPanel() {
     </section>
 
     <section class="panel-sec">
+      <h3>Desk</h3>
+      <p class="desk-line">${gearSummary(a, roomSeed(d)).map((x) => esc(x)).join(" · ")}</p>
+    </section>
+
+    <section class="panel-sec">
       <h3>Files touched</h3>
       ${a.files.length ? `<ul class="files">${a.files.map((f) => `<li><code>${esc(f)}</code></li>`).join("")}</ul>`
         : `<p class="muted">No files yet.</p>`}
@@ -672,6 +765,101 @@ function renderPanel() {
     </button>
     ${state.detailsOpen ? detailsHtml(a) : ""}
   `;
+}
+
+// A small pixel desk for the "new desk" button.
+const DESK_ICON = `<svg viewBox="0 0 12 10" shape-rendering="crispEdges" aria-hidden="true">
+  <rect x="0" y="2" width="12" height="3" fill="#3a2f3f"/><rect x="1" y="3" width="10" height="1" fill="#dba35a"/>
+  <rect x="1" y="5" width="2" height="5" fill="#3a2f3f"/><rect x="9" y="5" width="2" height="5" fill="#3a2f3f"/>
+  <rect x="4" y="0" width="4" height="2" fill="#5a8be0"/></svg>`;
+
+// The panel for a room item: what it is, what staff do there, who is there now, and a dice to swap it.
+function renderItemPanel(panel, d) {
+  const slot = state.selectedItem;
+  const style = roomStyle(roomSeed(d), roomItems(d));
+  const info = describeItem(style, slot);
+  if (!info) {
+    state.selectedItem = null;
+    panel.classList.remove("open");
+    return;
+  }
+  const choices = swapChoices(style, slot);
+  const here = Scenes.visitors(d, slot).map((id) => findAgent(d, id)).filter(Boolean);
+  panel.innerHTML = `
+    <header class="panel-head">
+      <div class="avatar-wrap"><div class="avatar item-avatar">${itemPreviewSvg(roomSeed(d), roomItems(d), slot)}</div>
+        <button class="dice" data-item-dice="${esc(slot)}" ${choices.length ? "" : "disabled"}
+          title="Swap for another random item" aria-label="Swap ${esc(info.name)} for another random item">🎲</button></div>
+      <div>
+        <h2>${esc(info.name)}</h2>
+        <p>${esc(info.type)} · ${esc(d.info.name)}</p>
+      </div>
+      <button class="icon-btn" id="closePanel" aria-label="Close panel">×</button>
+    </header>
+
+    <section class="panel-sec">
+      <h3>Overview</h3>
+      <p class="current">${esc(info.about)}</p>
+    </section>
+
+    <section class="panel-sec">
+      <h3>What staff do here</h3>
+      <p class="current">${esc(info.does || "Nothing: it is only there to look at.")}</p>
+      ${info.emotes ? `<p class="item-emotes" aria-hidden="true">${info.emotes.map((e) => `<span>${esc(e)}</span>`).join("")}</p>` : ""}
+    </section>
+
+    <section class="panel-sec">
+      <h3>Here now <span class="count">${here.length}</span></h3>
+      ${here.length ? `<ul class="task-list">${here.map((a) => `<li><b>${esc(a.name)}</b> <span class="muted">${esc(a.title)}</span></li>`).join("")}</ul>`
+        : `<p class="muted">Nobody at the moment.</p>`}
+    </section>
+
+    <section class="panel-sec">
+      <h3>Swap</h3>
+      <p class="muted">${choices.length
+        ? `🎲 puts another item in this place (${choices.length} fit here). What staff do here changes with it. 🎲 Room rolls the whole room again.`
+        : "Nothing else fits in this place."}</p>
+    </section>`;
+}
+
+// Puts another random item into a slot of the room.
+async function randomizeItem(slot) {
+  const d = cur();
+  if (!d) return;
+  const style = roomStyle(roomSeed(d), roomItems(d));
+  const choices = swapChoices(style, slot);
+  if (!choices.length) return;
+  const kind = choices[Math.floor(Math.random() * choices.length)];
+  const v = Math.floor(Math.random() * 1000);
+  if (state.live) {
+    try {
+      const info = await api("PUT", `/api/departments/${encodeURIComponent(d.id)}/room/items`, { slot, kind, v });
+      d.info = { ...d.info, ...info };
+    } catch (err) {
+      pushFeed(d, { kind: "system", text: `Could not change the item: ${err.message}` });
+    }
+  } else {
+    d.info = { ...d.info, roomItems: { ...roomItems(d), [slot]: { kind, v } } };
+  }
+  renderAll();
+}
+
+// A new random desk (shape, computer, drink, personal item) for one staff member.
+async function randomizeDesk(id) {
+  const d = cur();
+  const a = findAgent(d, id);
+  if (!a) return;
+  if (state.live) {
+    try {
+      const saved = await api("POST", `/api/departments/${encodeURIComponent(d.id)}/staff/${encodeURIComponent(id)}/desk`);
+      a.deskSeed = saved.deskSeed;
+    } catch (err) {
+      pushFeed(d, { kind: "system", text: `Could not change ${a.name}'s desk: ${err.message}` });
+    }
+  } else {
+    a.deskSeed = 1 + Math.floor(Math.random() * 1e9);
+  }
+  renderAll();
 }
 
 function panelTaskItem(t) {
@@ -805,16 +993,27 @@ async function randomizeAgent(id) {
   renderAll();
 }
 
+// Demo mode has no server to make people up, so it rolls a look here (same choices as server/people.mjs).
 function demoLook() {
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
   const gender = pick(["female", "male"]);
+  const shirt = pick([null, null, "#e8738a", "#5fb3b3", "#d9b24c", "#7d8fe0", "#c27ac9"]);
+  const hair2 = pick([null, null, null, null, "#ff6fb5", "#6fa3ef", "#5cc28f", "#f5c242"]);
   return {
-    gender, skin: pick(["#ffe0c7", "#eac09c", "#d9a57c", "#a8704a"]), hair: pick(["#2b2b2b", "#8a5a2b", "#d9a441", "#6b4f9e"]),
-    hairStyle: pick(gender === "female" ? ["long", "bob", "bun", "ponytail", "twintails", "braid", "curly", "afro"] : ["short", "spiky", "side", "buzz", "mohawk", "curly", "afro", "bald"]),
-    headwear: pick(["none", "none", "cap", "beanie", "headband"]), eyewear: pick(["none", "none", "round", "square", "sunglasses"]),
+    gender, skin: pick(["#ffe0c7", "#eac09c", "#d9a57c", "#a8704a"]), hair: pick(["#2b2b2b", "#8a5a2b", "#d9a441", "#6b4f9e", "#e07a5f"]),
+    hairStyle: pick(gender === "female"
+      ? ["long", "bob", "bun", "ponytail", "twintails", "braid", "curly", "afro", "wavy", "pixie", "hime", "buns", "sidetail"]
+      : ["short", "spiky", "side", "buzz", "mohawk", "curly", "afro", "bald", "undercut", "quiff", "bowl", "slick", "topknot", "dreads"]),
+    headwear: pick(gender === "female"
+      ? ["none", "none", "none", "beanie", "headband", "beret", "flower", "catears", "headphones"]
+      : ["none", "none", "none", "cap", "beanie", "bandana", "visor", "headphones"]),
+    eyewear: pick(["none", "none", "round", "square", "sunglasses"]),
     eyes: pick(["tall", "dot", "happy", "sleepy", "wide"]), mouth: pick(["small", "smile", "open", "flat"]),
-    outfit: pick(["tshirt", "collar", "hoodie", "sweater", "suit", "overalls", "scarf"]),
+    outfit: pick(["tshirt", "collar", "hoodie", "sweater", "suit", "overalls", "scarf", "vest", "jersey", "cardigan", "turtleneck", "stripes", "plaid", "polo", "labcoat", "blazer"]),
     detail: pick(gender === "female" ? ["none", "freckles", "earrings", "blush"] : ["none", "beard", "mustache", "freckles", "stubble"]),
+    accessory: pick(["none", "none", "none", "tie", "bowtie", "necklace", "lanyard", "pin"]),
+    build: pick(["short", "normal", "normal", "tall"]),
+    ...(shirt ? { shirt } : {}), ...(hair2 ? { hair2 } : {}),
   };
 }
 
@@ -825,12 +1024,12 @@ async function randomizeRoom() {
   if (state.live) {
     try {
       const info = await api("POST", `/api/departments/${encodeURIComponent(d.id)}/room/randomize`);
-      d.info = { ...d.info, ...info };
+      d.info = { ...d.info, roomItems: undefined, ...info };
     } catch (err) {
       pushFeed(d, { kind: "system", text: `Could not change the room: ${err.message}` });
     }
   } else {
-    d.info = { ...d.info, roomSeed: Math.floor(Math.random() * 1e9) };
+    d.info = { ...d.info, roomSeed: Math.floor(Math.random() * 1e9), roomItems: undefined };
   }
   renderAll();
 }
@@ -1187,6 +1386,21 @@ async function confirmMigration() {
   renderAll();
 }
 
+async function updateOffice() {
+  const d = cur();
+  if (!d) return;
+  if (!confirm(`Update the office files of ${d.info.name}? Hooks, the /office skill and the Agent Office section of CLAUDE.md are replaced with the current version and committed on the current branch. Your agents and their skills are not touched.`)) return;
+  $("#updateOfficeBtn").disabled = true;
+  try {
+    const res = await api("POST", `/api/departments/${encodeURIComponent(d.id)}/office/update`);
+    d.info = { ...d.info, ...res.info };
+    [...(res.log || []), ...(res.warnings || []).map((w) => `⚠ ${w}`)].forEach((line) => pushFeed(d, { kind: "system", notice: true, text: line }));
+  } catch (err) {
+    pushFeed(d, { kind: "system", notice: true, text: `Could not update the office files: ${err.message}` });
+  }
+  renderAll();
+}
+
 async function setHelper(id, helper) {
   const d = cur();
   try {
@@ -1503,6 +1717,7 @@ function bindEvents() {
     if (t.closest("#hireClose") || t.closest("[data-hire-cancel]")) return closeHire();
     if (t.closest("#releaseBtn")) return releaseDept();
     if (t.closest("#confirmMigrationBtn")) return confirmMigration();
+    if (t.closest("#updateOfficeBtn")) return updateOffice();
     const makeStaff = t.closest("[data-make-staff]");
     if (makeStaff) return setHelper(makeStaff.dataset.makeStaff, false);
     if (t.closest("#removeDeptBtn")) return removeDept();
@@ -1522,6 +1737,12 @@ function bindEvents() {
     const card = t.closest(".room-card[data-dept]");
     if (card) return openDept(card.dataset.dept);
 
+    const itemDice = t.closest("[data-item-dice]");
+    if (itemDice) return randomizeItem(itemDice.dataset.itemDice);
+    const deskDice = t.closest("[data-desk-dice]");
+    if (deskDice) return randomizeDesk(deskDice.dataset.deskDice);
+    const hit = t.closest("#roomStage [data-slot]");
+    if (hit) return openItem(hit.dataset.slot);
     const dice = t.closest("[data-dice]");
     if (dice) return randomizeAgent(dice.dataset.dice);
     if (t.closest("[data-room-dice]")) return randomizeRoom();
@@ -1635,7 +1856,7 @@ function bindEvents() {
       if (!$("#hireModal").hidden) return closeHire();
       if (!$("#createModal").hidden) return closeCreate();
       if (state.proposal) { state.proposalDismissed.add(state.proposal.key); return closeProposalModal(); }
-      if (state.selectedId) return closePanel();
+      if (state.selectedId || state.selectedItem) return closePanel();
     }
   });
 
@@ -1691,7 +1912,7 @@ function connectLive() {
     if (!state.depts.has(snap.info.id)) state.depts.set(snap.info.id, makeDept(snap));
     if (!state.view) renderFloor();
   });
-  on("department-info", (d, info) => { d.info = { ...d.info, ...info }; });
+  on("department-info", (d, info) => { d.info = { ...d.info, roomItems: undefined, ...info }; });
   on("office-event", (d, ev) => applyEvent(d, ev));
   on("tasks", (d, data) => setTasks(d, data));
   on("staff", (d, staff) => setStaff(d, staff));
@@ -1700,7 +1921,11 @@ function connectLive() {
     d.proposalRaw = p;
     if (p && p.status === "pending") pushFeed(d, { kind: "system", notice: true, text: `${pmName(d)} proposed a team. Review it and approve to start.` });
   });
-  on("run", (d, run) => { d.run = run; });
+  on("run", (d, run) => {
+    const delivered = run && run.status === "done" && d.run && d.run.status === "running";
+    d.run = run;
+    if (delivered) cheer(d);
+  });
   on("runner", (d, runner) => { d.runner = runner || {}; });
   on("pm-turn", (d, data) => {
     const pm = findAgent(d, "pm");
@@ -1741,11 +1966,14 @@ function startDemo() {
   state.live = false;
   document.body.classList.add("demo");
   state.library = DEFAULT_AGENTS.map((a) => ({ ...a }));
-  const pick = (ids) => DEFAULT_AGENTS.filter((a) => ids.includes(a.id)).map((a) => ({ ...a }));
+  const pick = (ids) => DEFAULT_AGENTS.filter((a) => ids.includes(a.id)).map((a) => ({ ...a, look: { ...demoLook(), ...a.look } }));
+  const any = (list) => list[Math.floor(Math.random() * list.length)];
+  // Each sample shows another room look and another moment of a project.
   const samples = [
-    { id: "coffee-shop", name: "Coffee Shop Landing", team: ["pm", "ba", "dev_fe", "test"], progress: [100, 100, 70, 20] },
-    { id: "todo-app", name: "Shared TODO App", team: ["pm", "ba", "sa", "leader", "dev_be", "dev_fe", "test", "devops"], progress: [100, 60, 40, 30, 10, 0, 0] },
-    { id: "booking-api", name: "Booking API", team: ["pm", "sa", "dev_be", "test"], progress: [100, 50, 0] },
+    { id: "coffee-shop", name: "Coffee Shop Landing", seed: 7, team: ["pm", "ba", "dev_fe", "test"], progress: [100, 70, 20], joining: "devops" },
+    { id: "todo-app", name: "Shared TODO App", seed: 25, team: ["pm", "ba", "sa", "leader", "dev_be", "dev_fe", "test", "devops"], progress: [100, 60, 40, 30, 10, 0, 0] },
+    { id: "booking-api", name: "Booking API", seed: 14, team: ["pm", "sa", "dev_be", "test"], progress: [100, 50, 0], waiting: true },
+    { id: "docs-site", name: "Docs Site", seed: 30, team: ["pm", "ba", "dev_fe", "dev_be", "test"], progress: [100, 100, 100, 100], delivered: true },
   ];
   samples.forEach((s) => {
     const agents = pick(s.team);
@@ -1755,32 +1983,51 @@ function startDemo() {
       return { id: `T${i + 1}`, title: `${a.title} work for ${s.name}`, owner: a.id,
         status: progress >= 100 ? "done" : progress > 0 ? "doing" : "todo", progress };
     });
+    // Somebody who was approved and is still joining.
+    if (s.joining) agents.push({ ...pick([s.joining])[0], pending: true });
+    const busy = !s.waiting && !s.delivered;
     const d = makeDept({
-      info: { id: s.id, name: s.name, workspace: `D:\\Projects\\${s.id}`, repo: "", pmModel: "opus" },
-      staff: agents, tasks: { tasks }, proposal: null, run: { status: "running", request: `Build the ${s.name}` },
-      runner: { sessionId: "demo", busy: true, origin: "dashboard", costUsd: 0 }, events: [],
+      info: { id: s.id, name: s.name, workspace: `D:\\Projects\\${s.id}`, repo: "", pmModel: "opus", roomSeed: s.seed },
+      staff: agents, tasks: { tasks }, proposal: null,
+      run: { status: s.delivered ? "done" : "running", request: `Build the ${s.name}` },
+      runner: { sessionId: "demo", busy, origin: "dashboard", costUsd: 0 }, events: [],
     });
     state.depts.set(s.id, d);
   });
-  // One department waits for the customer.
-  const waiting = state.depts.get("booking-api");
-  waiting.runner = { sessionId: "demo", busy: false, origin: "dashboard" };
-  pushFeed(waiting, { kind: "msg", from: "pm", to: "customer", text: "Should bookings be cancellable by the customer, or only by staff?" });
+  pushFeed(state.depts.get("booking-api"), { kind: "msg", from: "pm", to: "customer", text: "Should bookings be cancellable by the customer, or only by staff?" });
+  pushFeed(state.depts.get("docs-site"), { kind: "msg", from: "pm", to: "customer", text: "The docs site is delivered and merged into preview." });
 
-  const lines = ["Reading the requirements…", "Writing the API contract", "Fixing a failing test", "Reviewing the layout", "Updating docs/plan.md"];
+  // The demo replays the same events a real run sends, so every scene of the room can be seen.
+  const briefs = ["Write the API contract", "Fix the failing test", "Review the layout", "Update docs/plan.md", "Add the booking form", "Check the acceptance criteria"];
+  const reports = ["Done: 3 files changed, tests pass.", "Reviewed, two small remarks.", "Implemented and documented.", "Found one bug, details in the report."];
+  const files = ["src/app.js", "src/api/routes.js", "docs/plan.md", "tests/app.test.js", "src/styles.css"];
   setInterval(() => {
     state.depts.forEach((d) => {
       if (!d.runner.busy) return;
-      d.agents.forEach((a) => {
-        if (Math.random() < 0.35) {
-          a.status = ["working", "working", "thinking", "talking", "idle"][Math.floor(Math.random() * 5)];
-          if (a.status === "talking" && Math.random() < 0.5) showBubble(d, a, lines[Math.floor(Math.random() * lines.length)], false);
-        }
-      });
+      const pm = findAgent(d, "pm");
+      const workers = d.agents.filter((a) => a.id !== "pm" && !a.pending);
+      const idle = workers.filter((a) => a.status === "idle");
+      const active = workers.filter((a) => a.status !== "idle");
+      const roll = Math.random();
+      if (roll < 0.3 && idle.length) {
+        const target = any(idle);
+        applyEvent(d, { hook: "PreToolUse", tool: "Agent", agent: "main", target: target.id, text: any(briefs) });
+        setTimeout(() => { applyEvent(d, { hook: "SubagentStart", agent: target.id }); renderDept(d); }, 1800);
+        setTimeout(() => { setStatus(pm, "thinking"); renderDept(d); }, 2400);
+      } else if (roll < 0.7 && active.length) {
+        const tool = any(["Edit", "Write", "Read", "Grep", "Bash", "WebSearch"]);
+        const who = any(active).id;
+        applyEvent(d, { hook: "PreToolUse", tool, agent: who, file: any(files) });
+        if (tool === "Bash" && Math.random() < 0.3) setTimeout(() => { applyEvent(d, { hook: "PostToolUseFailure", tool, agent: who }); renderDept(d); }, 1900);
+      } else if (roll < 0.88 && active.length > 1) {
+        applyEvent(d, { hook: "SubagentStop", agent: any(active).id, text: any(reports) });
+      }
     });
     renderTopbar();
     state.depts.forEach(renderDept);
-  }, 2500);
+  }, 2600);
+  // The delivered department celebrates once in a while.
+  setInterval(() => { const d = state.depts.get("docs-site"); if (d && state.view === d.id) cheer(d), renderDept(d); }, 45000);
   renderAll();
 }
 
@@ -1789,3 +2036,12 @@ function startDemo() {
 bindEvents();
 if (new URLSearchParams(location.search).has("demo")) startDemo();
 else connectLive();
+
+// Break walks in the open room, and a redraw when the sky in the windows changes with the time of day.
+setInterval(() => { const d = cur(); if (d) Scenes.tick(d, (a) => displayStatus(d, a)); }, Scenes.TICK_MS);
+let lastSky = skyPhase();
+setInterval(() => {
+  if (skyPhase() === lastSky) return;
+  lastSky = skyPhase();
+  state.depts.forEach(renderDept);
+}, 60000);

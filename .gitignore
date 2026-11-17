@@ -1,5 +1,5 @@
 # Default folder for department workspaces (each one is its own git repository)
-workspace/
+/workspace/
 
 # Departments registered on this machine (local paths and repository links)
 office/departments.json

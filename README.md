@@ -40,6 +40,10 @@ Server modules:
 | `server/run-controller.mjs` | Runs the PM through the Claude CLI, queues messages, limits parallel runs, auto-reload |
 | `server/staff-store.mjs` | Agent files and staff display data, assistants, installing staged agents and skills |
 | `server/people.mjs` | Random names and looks |
+| `server/http-guard.mjs` | Refuses API requests that do not come from the dashboard (other sites, rebound host names) |
+
+Dashboard scripts: `dashboard/js/pixel.js` draws rooms and characters, `scenes.js` plays the scenes in the open room
+(break walks, tasks flying between desks, confetti) and `app.js` holds the state, the API calls and the rest of the UI.
 
 The Agent Office repository itself has no agents or hooks, so working on Agent Office is never logged as office activity.
 
@@ -58,6 +62,8 @@ agents it ends the turn with `[[office:reload]]`; the dashboard then starts the 
    ```bash
    node server/office-server.mjs
    ```
+
+   `npm start` does the same; `npm test` runs the server tests (they need git and work in temporary folders).
 
    Open http://localhost:5178. The badge shows **LIVE** when the server is connected.
 
@@ -94,19 +100,59 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
   repository stay on disk, so you can open it again.
 
 ### Room
-- **Room look**: generated from a seed: desk layout (rows, cubicles, facing pods, long bench), manager corner on the
-  left or right, lounge (meeting table, sofa and TV, ping-pong, round table), desk and chair models, wall decoration,
-  floor items (vending machine, aquarium, arcade, printer, beanbags...) and one of eight color palettes.
-  **🎲 Room** (top left of the room) picks a new look.
-- **Character states**: typing (working), thought bubble (reading/thinking), speech bubble (delegating),
-  raised hand with **!** (needs your answer), mug with steam (idle), check mark (project delivered),
-  faded with "joining" (approved, profile not written yet).
+- **Room look**: generated from a seed: desk layout (rows, cubicles, facing pods, long bench, staggered rows, shared
+  desks for two), manager corner on the left or right, one of 10 lounges (meeting table, sofa and TV, ping-pong,
+  round table, kitchen, reading corner, indoor garden, gaming corner, nap pods, band corner), up to five of 40 wall
+  decorations (eight paintings, pin board, roadmap, dartboard, string lights, world clocks, guitar, mirror...), four
+  of 23 floor items (coffee machine, aquarium, arcade, table football, treadmill, massage chair, speaker, snack shelf,
+  the office cat or dog, a bird cage...), a shelf and a cabinet in the manager's corner, a cleaning robot, chair models
+  and one of eight color palettes. The floor is one open space: no rugs mark the areas. **🎲 Room** (top left of the
+  room) picks a new look.
+- **Click any decoration** (a picture, the lounge, a floor item, the manager's shelf or cabinet, the pet or the
+  cleaning robot) to see it in the side panel: what it is, what staff do there, and who is there now. Its **🎲**
+  swaps it for another item that fits the same place; what staff do there changes with it (a sofa to sit on becomes
+  a band corner to play in). Swapped items are saved with the department; **🎲 Room** starts over without them.
+- **Desks differ from person to person**: shape (panel, open legs, trestle, rounded, curved, L-shape on either side,
+  with drawers, two pedestals, hairpin legs, wave front, round end, on wheels, on crates), width, material (the room's,
+  birch or a glass top), computer (laptop, monitor, side screen, two screens, tablet), drink (mug, tea, takeaway cup,
+  glass, bottle, can, bubble tea, or none) and a personal thing (photo, lamp, plant, books, rubber duck, robot, fan,
+  sticky notes, globe) or the role's own prop. The staff panel says what is on the desk; the desk button next to
+  **🎲** gives that person a new random desk.
+- **The PM stands out**: a navy blazer with a gold tie and pin, a headset, an executive desk (panelled, glass on
+  chrome, curved, white lacquer, antique or with a side wing) with a name plate and two screens, a high-backed chair
+  (brown or black leather, a wing chair, white and gold), and a gold star on the name tag.
+- The windows show the real time of day (day, sunset, night), and the furniture moves: fish swim, screens update, the
+  coffee machine steams, the cat flicks its tail.
+- **Character states**, each a small scene. People have habits, so the same state looks different from desk to desk:
+  - **Working**: fast typing and a glowing screen, with sparks, code in a bubble or a keyboard on fire; a desk lamp lights up.
+  - **Thinking**: thought bubble and a light bulb, floating question marks, or reading a document held up.
+  - **Talking** (delegating): moving mouth, sound waves and a speech bubble; the task flies as a note to the person
+    who gets it, and their report flies back to the PM.
+  - **Needs you**: raised, waving hand with **!**, a red beacon on the desk and a blinking name tag.
+  - **Idle**: coffee (with a sip now and then), a nap, music, the phone, stretching or daydreaming.
+  - **Queued**: hourglass, while the department waits for a free run slot.
+  - **Error**: red screen, smoke from the computer, a worried face and a drop of sweat.
+  - **Delivered**: the whole team cheers under confetti with a grin and a trophy; the PM keeps the check mark.
+  - **Joining**: faded, with a moving box on the desk (approved, profile not written yet).
+  - **What they do right now** flashes over the head for a moment: terminal, search, pencil, book or globe for the
+    tool in use, a red cross for a failed command, a star for a finished task.
+- **Breaks use the room**: idle people walk to a place and use it. They sit on the sofa (the TV turns on), at the
+  meeting or round table, on the kitchen stools, the garden bench, the armchair or the beanbags; play ping-pong (a
+  ball flies over the table) or the arcade; wait at the coffee machine and come back with a mug; pet the cat; or step
+  out through the sliding door. Sometimes two to four people take the break together and chat in the lounge.
+  Everybody comes straight back when work arrives.
+- **The room has a life of its own**: a cleaning robot (vacuum, mop or drone) crosses the floor, the office pet leaves
+  its bed for a walk, and a courier brings a parcel to the PM's desk now and then.
+- The line under the room counts who is doing what. Scenes stop when your system asks for reduced motion.
 - **Client desk**: send a request or reply to the PM. **Messages** holds what you read or answer (your messages, the
   PM's replies, approvals, errors) with "Needs your reply" on the PM's open question; **Activity** holds the team's
   work (tools, delegation, reports).
 - **Task board**: search, filter by owner, scrolling columns; Done shows the latest five until you expand it.
   Setup work by the PM (writing the PM profile, creating the team, writing skills) shows as `S` tasks.
 - **Release to main** merges `preview` into `main`; **Confirm migration** appears while a migrated project waits.
+- **Update office files** appears when a department still has the hooks, `/office` skill or CLAUDE.md section of an
+  older Agent Office version. It installs the current ones and commits only those files on the current branch (not on
+  `main`); your agents and their skills are not touched.
 
 ### Staff (HR)
 - Click a character for progress, tasks (open first, finished ones collapsed), recent activity and files.
@@ -114,7 +160,8 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
   eyewear, eyes, mouth, outfit and face details, plus a role accessory.
 - **Details** edits the profile (name, title, role, model, description, skills, tools, responsibilities). Skills shown
   dashed do not exist yet; the PM writes them on its next turn. **Make assistant** moves the person to the assistants
-  (helper agents that get no tasks); **Dismiss** moves the profile to `.office/dismissed/`.
+  (helper agents that get no tasks; they keep their name and look if they come back); **Dismiss** moves the profile to
+  `.office/dismissed/`.
 - **+ Hire staff**: nobody joins until you confirm.
   - **Auto**: describe who you need; the PM designs the role and sends a hire proposal. Press **Hire** to approve,
     then the PM writes the profile and skills.
@@ -129,8 +176,11 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
   Anything else is denied and the PM reports it.
 - `maxParallelRuns` (default 2) limits how many departments run at the same time; others wait in a queue.
 - Git pushes use the git credentials already set up on this machine.
+- The server listens on `127.0.0.1` only and answers API calls only from the dashboard itself: requests from other
+  web sites, or through a host name that is not localhost, are refused. Stopping the server stops running PM turns.
 
 ### Demo mode
 
 Open http://localhost:5178/?demo (or serve `dashboard/` with any static server) to see sample departments
-with simulated activity. Nothing is saved in demo mode.
+with simulated activity: four rooms with different looks (working, waiting for you, delivered, somebody joining).
+Nothing is saved in demo mode.

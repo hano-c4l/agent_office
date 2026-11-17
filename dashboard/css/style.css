@@ -127,6 +127,8 @@ body:not(.demo) .demo-only { display: none !important; }
 .tag-waiting { border-bottom-color: var(--waiting); background: #9b2c3f; }
 .tag-error { border-bottom-color: #8b93a1; }
 .tag-done { border-bottom-color: var(--working); }
+.tag-queued { border-bottom-color: var(--thinking); border-bottom-style: dotted; }
+.tag.away { opacity: .55; }
 .tag.selected { outline: 2px solid #ffd84d; }
 .room.mini .tag, .room.mini .say { display: none; }
 .say {
@@ -137,47 +139,268 @@ body:not(.demo) .demo-only { display: none !important; }
 }
 @keyframes pop { from { transform: translate(-50%, -80%) scale(.7); opacity: 0; } }
 
-/* Character states. Pixel steps keep the motion crisp. */
+/* Character states. Pixel steps keep the motion crisp.
+   Each state is a small scene: what the person does, the icon over the head and what happens on the desk. */
 .ws .body { animation: breathe 2.4s steps(1) infinite; }
 .ws .lids { opacity: 0; animation: blink 4.2s steps(1) infinite; }
-.ws .arm-up, .ws .icon, .ws .steam { display: none; }
+.ws .arm-up, .ws .icon, .ws .steam, .ws .talk-mouth, .ws .phone, .ws .sparks, .ws .movebox,
+.ws .mood, .ws .readdoc, .ws .flame, .ws .smoke, .ws .beacon, .ws .trophy, .ws .desklamp { display: none; }
+.ws.back .code { display: none; }
 .ws .glow { opacity: 0; }
 @keyframes breathe { 50% { transform: translateY(1px); } }
 @keyframes blink { 0%, 95% { opacity: 0; } 96%, 100% { opacity: 1; } }
 
+/* Working: fast typing, a glowing screen and sparks flying off the keyboard. */
 .st-working .hands rect:first-child { animation: tap .26s steps(1) infinite; }
 .st-working .hands rect:last-child { animation: tap .26s steps(1) .13s infinite; }
 .st-working .glow { animation: glow 1.1s steps(2) infinite; }
 .st-working .body { animation: breathe .9s steps(1) infinite; }
+.st-working .sparks, .st-working.back .code, .st-working .desklamp { display: inline; }
+.st-working .desklamp { opacity: .55; }
+/* Busy habits: some people show what they write, some are on fire. */
+.st-working[data-idle="1"] .icon-code, .st-working[data-idle="4"] .icon-code { display: inline; opacity: 0; animation: idea 5s steps(1) infinite; }
+.st-working[data-idle="2"] .flame, .st-working[data-idle="5"] .flame { display: inline; animation: flame .4s steps(1) infinite; }
+.st-working[data-idle="2"] .sparks, .st-working[data-idle="5"] .sparks { display: none; }
+@keyframes flame { 50% { transform: translateY(-1px); opacity: .8; } }
+.st-working .sparks rect { animation: spark 1.2s steps(4) infinite; }
+.st-working .sparks .k1 { animation-delay: .4s; }
+.st-working .sparks .k2 { animation-delay: .8s; }
+.st-working .code rect { animation: amb-blink .9s steps(1) infinite; }
+.st-working .code .k1 { animation-delay: .45s; }
 @keyframes tap { 50% { transform: translateY(-1px); } }
 @keyframes glow { 0% { opacity: .18; } 50% { opacity: .32; } }
+@keyframes spark { 0% { transform: none; opacity: 1; } 100% { transform: translateY(-5px); opacity: 0; } }
 
+/* Thinking: dots in a thought bubble, a slow sway, and now and then an idea. */
 .st-thinking .icon-think { display: inline; }
 .st-thinking .icon-think .d1 { animation: dot 1.2s steps(1) infinite; }
 .st-thinking .icon-think .d2 { animation: dot 1.2s steps(1) .3s infinite; }
 .st-thinking .icon-think .d3 { animation: dot 1.2s steps(1) .6s infinite; }
+.st-thinking .icon-bulb { display: inline; opacity: 0; animation: idea 7s steps(1) infinite; }
+.st-thinking .body { animation: sway 2.8s steps(1) infinite; }
+/* Thinking habits: question marks instead of dots, or reading a document held up. */
+.st-thinking[data-idle="1"] .icon-think, .st-thinking[data-idle="4"] .icon-think,
+.st-thinking[data-idle="1"] .icon-bulb, .st-thinking[data-idle="4"] .icon-bulb { display: none; }
+.st-thinking[data-idle="1"] .icon-ask, .st-thinking[data-idle="4"] .icon-ask { display: inline; }
+.st-thinking .icon-ask .z1 { animation: zfloat 2.2s steps(4) infinite; }
+.st-thinking .icon-ask .z2 { animation: zfloat 2.2s steps(4) 1.1s infinite; }
+.st-thinking[data-idle="2"] .readdoc, .st-thinking[data-idle="5"] .readdoc { display: inline; animation: breathe 1.8s steps(1) infinite; }
 @keyframes dot { 50% { opacity: .15; } }
+@keyframes idea { 0%, 78% { opacity: 0; transform: none; } 80% { opacity: 1; transform: translateY(-1px); } 84%, 96% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@keyframes sway { 0%, 100% { transform: none; } 25% { transform: translateX(-1px); } 75% { transform: translateX(1px); } }
 
+/* Talking: the mouth moves, the head nods, the speech bubble hops. */
 .st-talking .icon-talk { display: inline; animation: hop .6s steps(1) infinite; }
 .st-talking .body { animation: nod .5s steps(1) infinite; }
+.st-talking .talk-mouth { display: inline; animation: flap .34s steps(1) infinite; }
+.st-talking .icon-wave { display: inline; }
+.st-talking .icon-wave .z1 { animation: flap .5s steps(1) infinite; }
+.st-talking .icon-wave .z2 { animation: flap .5s steps(1) -.25s infinite; }
 @keyframes nod { 50% { transform: translateY(1px); } }
 @keyframes hop { 50% { transform: translateY(-1px); } }
+@keyframes flap { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
 
+/* Needs you: a raised, waving hand and a bouncing alert. */
 .st-waiting .arm-up { display: inline; animation: wave .5s steps(1) infinite; }
 .st-waiting .icon-alert { display: inline; animation: bounce .7s steps(1) infinite; }
+.st-waiting .mood-oh, .st-waiting .beacon { display: inline; }
+.st-waiting .beacon rect:last-child { animation: amb-blink .5s steps(1) infinite; }
+.tag-waiting { animation: tag-call 1s steps(2) infinite; }
+@keyframes tag-call { 50% { background: #c2405a; } }
 @keyframes wave { 50% { transform: translateX(1px); } }
 @keyframes bounce { 50% { transform: translateY(-2px); } }
 
+/* Idle: everybody has a habit (data-idle): coffee, a nap, music or the phone. */
 .st-idle .steam { display: inline; animation: steam 2s steps(1) infinite; }
 .st-idle .body { animation: breathe 3.6s steps(1) infinite; }
+.st-idle[data-idle="1"] .icon-zzz { display: inline; }
+.st-idle[data-idle="1"] .icon-zzz .z1 { animation: zfloat 2.6s steps(4) infinite; }
+.st-idle[data-idle="1"] .icon-zzz .z2 { animation: zfloat 2.6s steps(4) 1.3s infinite; }
+.st-idle[data-idle="1"] .lids { opacity: 1; animation: none; }
+.st-idle[data-idle="1"] .body { animation: doze 4.4s steps(1) infinite; }
+.st-idle[data-idle="2"] .icon-note { display: inline; }
+.st-idle[data-idle="2"] .icon-note .n1 { animation: zfloat 1.8s steps(4) infinite; }
+.st-idle[data-idle="2"] .icon-note .n2 { animation: zfloat 1.8s steps(4) .9s infinite; }
+.st-idle[data-idle="2"] .body { animation: sway 1.2s steps(1) infinite; }
+.st-idle[data-idle="3"] .phone { display: inline; }
+.st-idle[data-idle="3"] .phone rect:last-child { animation: amb-blink 2.3s steps(1) infinite; }
+.st-idle[data-idle="0"] .mug { animation: sip 7s steps(1) infinite; }
+.st-idle[data-idle="4"] .arm-up { display: inline; opacity: 0; animation: stretch 8s steps(1) infinite; }
+.st-idle[data-idle="4"] .mood-oh { display: inline; opacity: 0; animation: stretch 8s steps(1) infinite; }
+.st-idle[data-idle="5"] .icon-dream { display: inline; animation: hop 2.4s steps(1) infinite; }
+@keyframes sip { 0%, 78%, 100% { transform: none; } 80%, 96% { transform: translate(var(--sip-x, -12px), -7px); } }
+@keyframes stretch { 0%, 70%, 100% { opacity: 0; } 72%, 96% { opacity: 1; } }
 @keyframes steam { 0% { transform: translateY(0); opacity: .9; } 50% { transform: translateY(-2px); opacity: .5; } }
+@keyframes zfloat { 0% { transform: translateY(2px); opacity: 0; } 30% { opacity: 1; } 100% { transform: translate(2px, -4px); opacity: 0; } }
+@keyframes doze { 0%, 100% { transform: translateY(1px); } 50% { transform: translateY(2px); } }
 
-.st-error .icon-error { display: inline; }
-.st-error .body { animation: none; }
+/* Queued: waiting for a free run slot with an hourglass. */
+.st-queued .icon-queue { display: inline; }
+.st-queued .icon-queue .sand { animation: dot .8s steps(1) infinite; }
+.st-queued .body { animation: breathe 3.6s steps(1) infinite; }
+
+/* Error: a red screen, a shaking head and a drop of sweat. */
+.st-error .icon-error, .st-error .icon-sweat { display: inline; }
+.st-error .icon-sweat { animation: drip 1.6s steps(4) infinite; }
+.st-error .body { animation: shake 1.8s steps(1) infinite; }
+.st-error .glow { fill: #ff5a5a; animation: glow .5s steps(2) infinite; }
+.st-error .mood-worry, .st-error .smoke { display: inline; }
+.st-error .smoke rect { animation: spark 1.8s steps(5) infinite; }
+.st-error .smoke .k1 { animation-delay: .6s; }
+.st-error .smoke .k2 { animation-delay: 1.2s; }
+@keyframes drip { 0% { transform: none; opacity: 1; } 100% { transform: translateY(5px); opacity: 0; } }
+@keyframes shake { 0%, 60%, 100% { transform: none; } 70%, 90% { transform: translateX(-1px); } 80% { transform: translateX(1px); } }
+
+/* Done: arm in the air, a check mark and confetti. */
 .st-done .icon-done { display: inline; animation: hop 1.4s steps(1) infinite; }
+.st-done .arm-up { display: inline; animation: bounce .6s steps(1) infinite; }
+.st-done .body { animation: bounce .6s steps(1) infinite; }
+.st-done .icon-confetti, .st-done .mood-happy, .st-done .trophy { display: inline; }
+.st-done .trophy { animation: hop 1.2s steps(1) infinite; }
+.st-done .icon-confetti rect { animation: confetti-bit 1.5s steps(5) infinite; }
+.st-done .icon-confetti .c1 { animation-delay: .5s; }
+.st-done .icon-confetti .c2 { animation-delay: 1s; }
+@keyframes confetti-bit { 0% { transform: translateY(-3px); opacity: 1; } 100% { transform: translateY(9px); opacity: 0; } }
+
+/* A short flash of what somebody is doing right now (the tool in use, a failed command, a finished task).
+   It takes the place of the state icon for a moment. */
+.ws.fx-on .icon { display: none !important; }
+.ws.fx-term .fx-term, .ws.fx-search .fx-search, .ws.fx-write .fx-write, .ws.fx-read .fx-read, .ws.fx-web .fx-web,
+.ws.fx-fail .fx-fail, .ws.fx-star .fx-star { display: inline !important; animation: fx-pop .3s steps(3); }
+.ws.fx-fail .body { animation: shake .5s steps(1) infinite; }
+.ws.fx-star .fx-star { animation: bounce .5s steps(1) infinite; }
+@keyframes fx-pop { from { transform: translateY(3px); opacity: 0; } }
+
+/* Joining: the desk still has a moving box on it. Away: the chair is empty while its owner takes a break. */
+.ws.pending .movebox { display: inline; }
+.ws.pending .prop, .ws.pending .mug, .ws.pending .laptop, .ws.pending .icon, .ws.pending .phone { display: none; }
+.ws.away .body, .ws.away .hands, .ws.away .icon, .ws.away .glow, .ws.away .phone, .ws.away .sparks,
+.ws.away .readdoc, .ws.away .flame { display: none !important; }
+
+/* Furniture that moves on its own. */
+.amb-blink { animation: amb-blink 1.1s steps(1) infinite; }
+.amb-blink.slow { animation-duration: 2.7s; }
+.amb-flicker { animation: amb-flicker 3.1s steps(1) infinite; }
+.amb-fish { animation: amb-swim 7s steps(11) infinite alternate; }
+.amb-fish.f2 { animation: amb-swim-back 9s steps(12) infinite alternate; }
+.amb-bubble { animation: amb-rise 2.4s steps(6) infinite; }
+.amb-bubble.b2 { animation-delay: 1.1s; }
+.amb-steam { animation: steam 2s steps(1) infinite; }
+.amb-bar { transform-box: fill-box; transform-origin: bottom; animation: amb-bar 1.6s steps(4) infinite alternate; }
+.amb-bar.b2 { animation-delay: -.5s; }
+.amb-bar.b3 { animation-delay: -1s; }
+.amb-cloud { animation: amb-drift 50s steps(18) infinite alternate; }
+.amb-star { animation: amb-blink 3.3s steps(1) infinite; }
+.amb-star.s2 { animation-delay: 1.1s; }
+.amb-star.s3 { animation-delay: 2.2s; }
+.amb-hand { animation: amb-spin 60s steps(12) infinite; }
+.amb-tail { animation: amb-tail 2.8s steps(1) infinite; }
+.amb-zzz { animation: zfloat 3s steps(4) infinite; }
+.amb-paper { animation: amb-paper 6s steps(1) infinite; }
+.amb-air { animation: amb-air 2.2s steps(3) infinite; }
+.amb-wiggle { animation: amb-wiggle 5s steps(1) infinite; }
+.amb-lamp { opacity: .12; animation: amb-lamp 4s steps(2) infinite alternate; }
+@keyframes amb-blink { 50% { opacity: .25; } }
+@keyframes amb-flicker { 0%, 7%, 12%, 100% { opacity: 1; } 5%, 10% { opacity: .2; } 60% { opacity: .6; } }
+@keyframes amb-swim { to { transform: translateX(11px); } }
+@keyframes amb-swim-back { to { transform: translateX(-12px); } }
+@keyframes amb-rise { to { transform: translateY(-7px); opacity: 0; } }
+@keyframes amb-bar { to { transform: scaleY(.4); } }
+@keyframes amb-drift { to { transform: translateX(var(--drift, 16px)); } }
+@keyframes amb-spin { to { transform: rotate(360deg); } }
+@keyframes amb-tail { 0%, 70%, 100% { transform: none; } 75%, 90% { transform: translateY(-1px); } }
+@keyframes amb-paper { 0%, 55% { transform: translateY(3px); } 60% { transform: translateY(2px); } 65% { transform: translateY(1px); } 70%, 100% { transform: none; } }
+@keyframes amb-air { from { opacity: .9; } to { transform: translateY(3px); opacity: 0; } }
+@keyframes amb-wiggle { 0%, 80%, 100% { transform: none; } 85% { transform: translateX(1px); } 92% { transform: translateX(-1px); } }
+@keyframes amb-lamp { to { opacity: .24; } }
+
+.amb-fan { animation: amb-blink .2s steps(1) infinite; }
+.door-l, .door-r { transition: transform .35s steps(4); }
+.use-door .door-l { transform: translateX(-12px); }
+.use-door .door-r { transform: translateX(12px); }
+
+/* Furniture reacts while somebody uses it (the room gets a use-<name> class). */
+.use-tv .tv-screen { animation: tv 2.4s steps(1) infinite; }
+.tv-line { display: none; }
+.use-tv .tv-line { display: inline; animation: amb-blink .9s steps(1) infinite; }
+@keyframes tv { 0% { fill: #6fa3ef; } 25% { fill: #f2a65a; } 50% { fill: #5cc28f; } 75% { fill: #c27ac9; } }
+.use-pingpong .pp-ball { display: none; }
+.use-arcade .item-arcade .amb-blink, .use-arcade .item-arcade .amb-flicker { animation-duration: .25s; }
+.use-vending .item-vending .amb-blink { animation-duration: .2s; }
+.use-servers .item-servers .amb-blink, .use-servers .item-servers .amb-flicker { animation-duration: .2s; }
+.use-printer .item-printer .amb-paper { animation-duration: 1.4s; }
+.use-coffee .item-coffee .amb-steam, .use-coffee .lounge-kitchen .amb-steam { animation-duration: .5s; }
+.use-aquarium .item-aquarium .amb-fish, .use-pond .lounge-garden .amb-fish { animation-duration: 2.2s; }
+.use-cat .item-cat .amb-zzz { display: none; }
+.use-cat .item-cat .amb-tail { animation-duration: .5s; }
+.use-dog .item-dog .amb-zzz, .use-cat .item-cat .amb-zzz { display: none; }
+.use-dog .item-dog .amb-tail { animation-duration: .3s; }
+.use-band .lounge-band .amb-zzz { animation-duration: .8s; }
+.use-treadmill .item-treadmill .amb-blink { animation-duration: .2s; }
+.use-speaker .item-speaker .amb-blink { animation-duration: .25s; }
+.use-foosball .item-foosball .amb-wiggle { animation-duration: .6s; }
+.use-bird .item-bird .amb-wiggle { animation-duration: .8s; }
+.pet-away .pet-body { display: none; }
+
+/* Scenes on top of the open room: people on a break, tasks flying between desks, confetti. */
+.scene-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
+.walker { position: absolute; animation: walker-pop .25s steps(3); transition: opacity .4s; }
+.walker.outside { opacity: 0; }
+.walker-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.walker .leg-a, .walker .leg-b, .walker .walker-mug, .walker .walker-paddle, .walker .wb-back { display: none; }
+.walker.show-back .wb-front { display: none; }
+.walker.show-back .wb-back { display: inline; }
+.walker.sitting .walker-body { animation: breathe 2.6s steps(1) infinite; }
+.walker.play-pingpong .walker-paddle { display: inline; animation: swing .7s steps(1) infinite; }
+.walker.play-pingpong .walker-body { animation: breathe .7s steps(1) infinite; }
+.walker.play-arcade .walker-body { animation: sway .5s steps(1) infinite; }
+.walker.courier.delivered .walker-parcel { display: none; }
+@keyframes swing { 50% { transform: translate(-2px, -2px); } }
+.npc { position: absolute; }
+.npc.hit { pointer-events: auto; cursor: pointer; }
+.npc.hit:hover { filter: drop-shadow(0 0 2px #ffd84d) drop-shadow(0 0 2px #ffd84d); }
+.npc.vacuum.flying { animation: hover-bob 1s steps(2) infinite; }
+@keyframes hover-bob { 50% { transform: translateY(-12%); } }
+.walker.play-treadmill .leg-s { display: none; }
+.walker.play-treadmill .leg-a, .walker.play-treadmill .leg-b { display: inline; }
+.walker.play-treadmill .leg-a { animation: flap .3s steps(1) infinite; }
+.walker.play-treadmill .leg-b { animation: flap .3s steps(1) -.15s infinite; }
+.walker.play-treadmill .walker-body, .walker.play-dance .walker-body { animation: breathe .3s steps(1) infinite; }
+.walker.play-dance { animation: dance 1s steps(1) infinite; }
+@keyframes dance { 25% { transform: translateX(-6%); } 75% { transform: translateX(6%); } }
+.npc.vacuum .walker-svg, .npc.pet .walker-svg, .npc.parcel .walker-svg { overflow: visible; }
+.npc.pet .leg-a, .npc.pet .leg-b { display: none; }
+.npc.pet.walking .leg-s { display: none; }
+.npc.pet.walking .leg-a, .npc.pet.walking .leg-b { display: inline; }
+.npc.pet.walking .leg-a { animation: flap .3s steps(1) infinite; }
+.npc.pet.walking .leg-b { animation: flap .3s steps(1) -.15s infinite; }
+.npc.pet.flip .walker-svg { transform: scaleX(-1); }
+.npc.parcel { animation: walker-pop .25s steps(3); }
+.pp-live {
+  position: absolute; background: #fff; outline: 1px solid #3a2f3f; border-radius: 50%;
+  animation: pp-x .8s linear infinite alternate, pp-y .4s ease-out infinite alternate;
+}
+@keyframes pp-x { from { left: var(--x0); } to { left: var(--x1); } }
+@keyframes pp-y { from { top: var(--y0); } to { top: var(--y1); } }
+.walker.walking .leg-s { display: none; }
+.walker.walking .leg-a, .walker.walking .leg-b { display: inline; }
+.walker.walking .leg-a { animation: flap .36s steps(1) infinite; }
+.walker.walking .leg-b { animation: flap .36s steps(1) -.18s infinite; }
+.walker.walking .walker-body { animation: breathe .36s steps(1) infinite; }
+.walker.with-mug .walker-mug { display: inline; }
+.walker .emote {
+  position: absolute; left: 50%; bottom: 96%; transform: translateX(-50%); background: #fff; border: 2px solid #3a2f3f;
+  border-radius: 6px; padding: 0 4px; font-size: 13px; line-height: 1.5; white-space: nowrap; animation: pop-up .2s steps(3);
+}
+@keyframes walker-pop { from { transform: translateY(-20%) scale(.8); opacity: 0; } }
+@keyframes pop-up { from { transform: translate(-50%, 30%) scale(.6); opacity: 0; } }
+.fly-note { position: absolute; opacity: 0; filter: drop-shadow(0 2px 0 rgba(58, 47, 63, .35)); }
+.fly-note svg { display: block; width: 100%; height: auto; }
+.confetti i { position: absolute; top: -4%; width: 1.1%; aspect-ratio: 1; animation: confetti-fall 2.6s linear forwards; }
+@keyframes confetti-fall { to { top: 104%; transform: translateX(18px) rotate(540deg); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .ws *, .stat-alert, .badge-waiting { animation: none !important; }
+  .ws *, .room-svg *, .walker *, .npc *, .pp-live, .stat-alert, .badge-waiting, .tag-waiting { animation: none !important; }
 }
 
 /* ---------- department view ---------- */
@@ -470,3 +693,28 @@ legend { font-weight: 800; font-size: 12px; padding: 0 4px; }
 #agentPickList { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
 .agent-option { flex-direction: row !important; align-items: flex-start; gap: 8px !important; font-weight: 400 !important; }
 .agent-option input { margin-top: 3px; }
+
+/* ---------- status strip, queued and away pills, office update ---------- */
+.status-strip { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; min-height: 22px; }
+.status-strip .pill { border: 2px solid #3a2f3f; padding: 1px 9px; font-size: 12px; }
+.pill-queued { background: #fff2c2; color: #9a6a00; }
+.pill-away { background: #e9e4f5; color: #5b3590; }
+.pill-pending { background: #f1ebe2; color: #6b5a4c; }
+.office-banner { background: #fff2c2; border-color: #a77b00; }
+
+/* ---------- the PM's name tag ---------- */
+.tag.pm { box-shadow: 0 0 0 1px #f5c242; }
+.tag.pm b::before { content: "★ "; color: #f5c242; }
+
+/* ---------- room items: click targets, their panel, the desk dice ---------- */
+.item-hit { position: absolute; background: transparent; border: 0; padding: 0; cursor: pointer; pointer-events: auto; border-radius: 4px; }
+.item-hit:hover, .item-hit:focus-visible { outline: 3px dashed rgba(255, 216, 77, .95); outline-offset: -1px; background: rgba(255, 216, 77, .12); }
+.item-avatar { padding: 4px; background: #e9eef0; }
+.item-preview { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.item-emotes { display: flex; gap: 6px; margin: 8px 0 0; font-size: 18px; }
+.item-emotes span { background: #fff; border: 2px solid #3a2f3f; border-radius: 6px; padding: 0 5px; }
+.dice:disabled { opacity: .45; cursor: default; transform: none; }
+.desk-dice { right: auto; left: -8px; display: flex; align-items: center; justify-content: center; }
+.desk-dice svg { width: 16px; height: 13px; image-rendering: pixelated; }
+.desk-line { margin: 0; }
+.desk-line::first-letter { text-transform: uppercase; }
