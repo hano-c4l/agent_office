@@ -103,6 +103,10 @@ async function handleDepartment(req, res, dept, parts) {
       const agent = dept.store.randomize(sub);
       return agent ? send(res, 200, agent) : send(res, 404, { error: "Not found" });
     }
+    if (req.method === "POST" && action === "desk") {
+      const agent = dept.store.randomizeDesk(sub);
+      return agent ? send(res, 200, agent) : send(res, 404, { error: "Not found" });
+    }
     if (req.method === "POST" && action === "helper") {
       const body = await readBody(req);
       dept.store.setHelper(sub, Boolean(body.helper));
@@ -132,6 +136,14 @@ async function handleDepartment(req, res, dept, parts) {
 
   if (section === "room" && sub === "randomize" && req.method === "POST") {
     dept.randomizeRoom();
+    company.save();
+    broadcast("department-info", { dept: dept.id, data: dept.publicInfo() });
+    return send(res, 200, dept.publicInfo());
+  }
+
+  if (section === "room" && sub === "items" && req.method === "PUT") {
+    const body = await readBody(req);
+    dept.setRoomItem(body.slot, body.kind, body.v);
     company.save();
     broadcast("department-info", { dept: dept.id, data: dept.publicInfo() });
     return send(res, 200, dept.publicInfo());

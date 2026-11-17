@@ -51,9 +51,9 @@ export function readDepartmentFile(root) {
 }
 
 export function writeDepartmentFile(root, info) {
-  const { id, name, pmModel, repo, mode, createdAt, migration, docFolders, theme, roomSeed } = info;
+  const { id, name, pmModel, repo, mode, createdAt, migration, docFolders, theme, roomSeed, roomItems } = info;
   const data = {
-    id, name, pmModel, repo, mode: mode || "new", createdAt, theme, roomSeed, migration, docFolders: docFolders || [],
+    id, name, pmModel, repo, mode: mode || "new", createdAt, theme, roomSeed, roomItems, migration, docFolders: docFolders || [],
     roleCatalog: ROLE_CATALOG_FILE,
   };
   fs.mkdirSync(path.dirname(departmentFile(root)), { recursive: true });

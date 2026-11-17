@@ -3,7 +3,7 @@
 //   ping-pong or the arcade, wait at the coffee machine, pet the cat, or step outside,
 // - sometimes several people take the break together and gather in the lounge,
 // - a task flies from the PM to whoever gets it, and the report flies back,
-// - the room has a life of its own: a robot vacuum, the cat going for a walk, a courier with a parcel,
+// - the room has a life of its own: a cleaning robot, the pet going for a walk, a courier with a parcel,
 // - confetti when a project is delivered.
 // Scenes are decoration only: they never change the state of the department, and a person who gets
 // work while away is back at the desk at once.
@@ -98,7 +98,7 @@ const Scenes = (() => {
     const mine = ++generation;
     if (reducedMotion()) return;
     vacuumLoop(mine);
-    catLoop(mine);
+    petLoop(mine);
     courierLoop(mine);
   }
 
@@ -108,7 +108,7 @@ const Scenes = (() => {
     breaks.clear();
     if (stage) {
       stage.querySelectorAll(".scene-layer").forEach((el) => el.remove());
-      [...stage.classList].filter((c) => c.startsWith("use-") || c === "cat-away").forEach((c) => stage.classList.remove(c));
+      [...stage.classList].filter((c) => c.startsWith("use-") || c === "pet-away").forEach((c) => stage.classList.remove(c));
     }
     uses.clear();
     stage = null;
@@ -306,7 +306,10 @@ const Scenes = (() => {
     await wait(between(2000, 6000));
     if (!alive(mine)) return;
     const host = layer();
-    const bot = { el: sprite("npc vacuum", vacuumSvg(), 10, 6), cancelled: false };
+    const bot = { el: sprite("npc vacuum hit", vacuumSvg(layout.vacuum.kind, layout.vacuum.v), 10, 6), cancelled: false };
+    bot.el.dataset.slot = "vacuum";
+    bot.el.title = layout.vacuum.name;
+    if (layout.vacuum.kind === "drone") bot.el.classList.add("flying");
     let at = floorPoint();
     place(bot.el, at);
     host.appendChild(bot.el);
@@ -318,33 +321,41 @@ const Scenes = (() => {
     }
   }
 
-  // The cat leaves its cushion, strolls around, sits somewhere for a while and goes back to sleep.
-  async function catLoop(mine) {
-    while (alive(mine) && layout.cat) {
+  // The pet leaves its bed, strolls around, sits somewhere for a while and goes back to sleep.
+  async function petLoop(mine) {
+    while (alive(mine) && layout.pet) {
       await wait(between(20000, 50000));
       if (!alive(mine)) return;
-      const spot = layout.spots.find((s) => s.use === "cat");
+      const pet = layout.pet;
+      const spot = layout.spots.find((s) => s.slot === pet.slot);
       if (!spot || spot.busy || document.hidden) continue;
       spot.busy = true;
-      stage.classList.add("cat-away");
-      const home = { x: layout.cat.x + 2, y: layout.cat.y - 1 };
-      const cat = { el: sprite("npc cat", catSpriteSvg(layout.cat.color), 14, 9), cancelled: false };
-      place(cat.el, home);
-      layer().appendChild(cat.el);
+      stage.classList.add("pet-away");
+      const home = { x: pet.x + 2, y: pet.y - 1 };
+      const walker = { el: sprite(`npc pet hit ${pet.kind}`, petSpriteSvg(pet.kind, pet.v), 15, 9), cancelled: false };
+      walker.el.dataset.slot = pet.slot;
+      place(walker.el, home);
+      layer().appendChild(walker.el);
       let at = home;
       for (let i = 0; i < 2 && alive(mine); i++) {
         const to = floorPoint();
-        await walk(cat, [at, { x: to.x, y: at.y }, to], 20);
+        await walk(walker, [at, { x: to.x, y: at.y }, to], pet.kind === "dog" ? 26 : 20);
         at = to;
         await wait(between(3500, 7000));
       }
       if (!alive(mine)) return;
-      await walk(cat, [at, { x: home.x, y: at.y }, home], 20);
-      cat.el.remove();
+      await walk(walker, [at, { x: home.x, y: at.y }, home], 20);
+      walker.el.remove();
       if (!alive(mine)) return;
-      stage.classList.remove("cat-away");
+      stage.classList.remove("pet-away");
       spot.busy = false;
     }
+  }
+
+  // Who is at (or on the way to) the item in a slot.
+  function visitors(dept, slot) {
+    if (!dept || dept.id !== deptId) return [];
+    return [...breaks].filter(([, b]) => b.spot && b.spot.slot === slot).map(([id]) => id);
   }
 
   // A courier comes in through the door, brings a parcel to the manager's desk and leaves.
@@ -387,5 +398,5 @@ const Scenes = (() => {
     }
   }
 
-  return { attach, clear, isAway, sync, tick, note, celebrate, TICK_MS };
+  return { attach, clear, isAway, sync, tick, note, celebrate, visitors, TICK_MS };
 })();

@@ -538,25 +538,38 @@ function walkerSvg(agent, { carry = "" } = {}) {
 }
 
 // The office cat on its feet (two leg frames alternate while it walks).
-function catSpriteSvg(color = "#e8a25c") {
+const CAT_COLORS = ["#e8a25c", "#5d6470", "#f4f4f1", "#3a2f3f"];
+const DOG_COLORS = ["#c98a5a", "#f3e2c7", "#6b4129", "#9aa3ad"];
+
+// The office pet on its feet (two leg frames alternate while it walks).
+function petSpriteSvg(kind = "cat", variant = 0) {
+  const dog = kind === "dog";
+  const color = (dog ? DOG_COLORS : CAT_COLORS)[variant % 4];
   const dark = shade(color, -45);
   const frame = (legs) => {
     const p = new Map();
     fill(p, 1, 2, 9, 5, color); fill(p, 8, 0, 11, 3, color);
-    dots(p, [[8, 0], [11, 0]], dark);
-    dots(p, [[0, 0], [0, 1], [0, 2]], dark);
+    if (dog) { fill(p, 11, 2, 12, 3, color); p.set("12,2", PX.outline); dots(p, [[8, 0], [8, 1], [8, 2]], dark); dots(p, [[0, 1], [0, 2]], color); }
+    else { dots(p, [[8, 0], [11, 0]], dark); dots(p, [[0, 0], [0, 1], [0, 2]], dark); }
     p.set("10,2", PX.outline);
     dots(p, legs, color);
     return pixelsToRects(withOutline(p));
   };
-  return `<svg class="walker-svg" viewBox="-1 -1 14 9" shape-rendering="crispEdges" aria-hidden="true">
+  return `<svg class="walker-svg" viewBox="-1 -1 15 9" shape-rendering="crispEdges" aria-hidden="true">
     <g class="leg-s">${frame([[2, 6], [8, 6]])}</g><g class="leg-a">${frame([[2, 6], [7, 6]])}</g><g class="leg-b">${frame([[3, 6], [8, 6]])}</g></svg>`;
 }
 
 // A robot vacuum that wanders over the free floor.
-function vacuumSvg() {
-  return `<svg class="walker-svg" viewBox="0 0 10 6" shape-rendering="crispEdges" aria-hidden="true">
-    ${box(0, 1, 10, 5, "#3d424e")}${rect(1, 0, 8, 1, "#5d6470")}${rect(4, 2, 2, 1, "#5cc28f", "amb-blink")}</svg>`;
+// Cleaning robots that wander over the free floor: a disc, a square mop and a small drone.
+function vacuumSvg(kind = "disc", variant = 0) {
+  const body = ["#3d424e", "#f4f4f1", "#e05a5a", "#5a8be0"][variant % 4];
+  let inner;
+  if (kind === "mop") inner = box(0, 0, 10, 6, body) + rect(1, 5, 8, 1, "#7fd0ef") + rect(4, 2, 2, 1, "#f5c242", "amb-blink");
+  else if (kind === "drone") {
+    inner = rect(1, 5, 8, 1, "rgba(58,47,63,.25)") + box(2, 1, 6, 3, body) + rect(0, 0, 3, 1, "#9aa3ad", "amb-fan") + rect(7, 0, 3, 1, "#9aa3ad", "amb-fan") +
+      rect(4, 2, 2, 1, "#5cc28f", "amb-blink");
+  } else inner = box(0, 1, 10, 5, body) + rect(1, 0, 8, 1, shade(body, 30)) + rect(4, 2, 2, 1, "#5cc28f", "amb-blink");
+  return `<svg class="walker-svg" viewBox="0 0 10 6" shape-rendering="crispEdges" aria-hidden="true">${inner}</svg>`;
 }
 
 function parcelSvg() {
@@ -690,6 +703,133 @@ function airConditioner(x, y) {
     group("amb-air", rect(x + 5, y + 10, 4, 1, "#dff4fc") + rect(x + 13, y + 11, 5, 1, "#dff4fc") + rect(x + 21, y + 10, 3, 1, "#dff4fc"));
 }
 
+// Framed pictures. The scene is drawn inside the frame (iw x ih pixels).
+const ART = {
+  sea: (x, y, w, h) => rect(x, y, w, h, "#bfe3f2") + rect(x, y + h - 5, w, 5, "#5a8be0") + rect(x + w - 5, y + 2, 3, 3, "#fff3a6") +
+    rect(x + 4, y + h - 9, 1, 5, PX.outline) + rect(x + 5, y + h - 9, 3, 3, PX.paper) + rect(x + 2, y + h - 4, 7, 1, "#8a5a2b"),
+  mountain: (x, y, w, h) => rect(x, y, w, h, "#dff4fc") + rect(x + 5, y + 3, 2, 2, "#9aa3ad") + rect(x + 4, y + 5, 4, 2, "#9aa3ad") + rect(x + 2, y + 7, 8, h - 7, "#9aa3ad") +
+    rect(x + 5, y + 3, 2, 1, PX.paper) + rect(x + w - 7, y + 6, 5, h - 6, "#76828c") + rect(x + w - 5, y + 5, 2, 1, PX.paper) + rect(x, y + h - 3, w, 3, "#7cc35a"),
+  abstract: (x, y, w, h) => rect(x, y, w, h, PX.paper) + rect(x + 1, y + 1, 6, 5, "#e05a5a") + rect(x + 8, y + 2, w - 9, 3, "#f5c242") +
+    rect(x + 3, y + 7, 4, h - 8, "#5a8be0") + rect(x + 9, y + 6, 5, 5, PX.outline) + rect(x + 10, y + 7, 3, 3, "#5cc28f"),
+  cat: (x, y, w, h) => rect(x, y, w, h, "#ffd0d9") + rect(x + 4, y + 4, w - 8, h - 5, "#e8a25c") + rect(x + 4, y + 2, 2, 2, "#e8a25c") + rect(x + w - 6, y + 2, 2, 2, "#e8a25c") +
+    rect(x + 6, y + 6, 1, 2, PX.outline) + rect(x + w - 7, y + 6, 1, 2, PX.outline) + rect(x + Math.floor(w / 2) - 1, y + 9, 2, 1, "#f4a3a3"),
+  sunset: (x, y, w, h) => rect(x, y, w, h, "#6b4f9e") + rect(x, y + 3, w, 3, "#e8738a") + rect(x, y + 6, w, 3, "#f2a65a") + rect(x + Math.floor(w / 2) - 3, y + 5, 6, 4, "#fff3a6") +
+    rect(x, y + 9, w, h - 9, "#3d2b4f") + rect(x + 3, y + 10, w - 6, 1, "#f2a65a"),
+  flower: (x, y, w, h) => rect(x, y, w, h, "#d8f5e5") + rect(x + Math.floor(w / 2), y + 6, 1, h - 7, "#3d7a36") + rect(x + Math.floor(w / 2) - 2, y + 2, 5, 5, "#ff8fb1") +
+    rect(x + Math.floor(w / 2) - 1, y + 3, 3, 3, "#f5c242") + rect(x + Math.floor(w / 2) + 1, y + 8, 3, 1, "#5aa04a") + rect(x + 2, y + h - 3, w - 4, 2, "#b9663a"),
+  city: (x, y, w, h) => rect(x, y, w, h, "#1d2547") + rect(x + 1, y + 5, 4, h - 5, "#3d4452") + rect(x + 6, y + 2, 4, h - 2, "#4b5563") + rect(x + 11, y + 6, w - 12, h - 6, "#3d4452") +
+    rect(x + 2, y + 7, 1, 1, "#fff3a6") + rect(x + 7, y + 4, 1, 1, "#fff3a6", "amb-blink slow") + rect(x + 8, y + 8, 1, 1, "#fff3a6") + rect(x + 12, y + 8, 1, 1, "#fff3a6") + rect(x + w - 4, y + 2, 2, 2, "#fff3a6"),
+  space: (x, y, w, h) => rect(x, y, w, h, "#1f2633") + rect(x + 5, y + 4, 6, 6, "#a98ae6") + rect(x + 6, y + 3, 4, 8, "#a98ae6") + rect(x + 3, y + 7, 10, 1, "#f5c242") +
+    rect(x + 2, y + 2, 1, 1, "#ffffff", "amb-star") + rect(x + w - 3, y + 3, 1, 1, "#ffffff", "amb-star s2") + rect(x + w - 5, y + h - 3, 1, 1, "#fff3a6", "amb-star s3"),
+};
+
+function painting(x, y, w, h, scene, frame) {
+  return box(x, y, w, h, frame) + rect(x + 1, y + 1, w - 2, h - 2, shade(frame, 20)) + ART[scene](x + 2, y + 2, w - 4, h - 4);
+}
+
+function dartboard(x, y) {
+  return box(x, y, 14, 14, "#2a2433") + box(x + 2, y + 2, 10, 10, "#e05a5a") + box(x + 4, y + 4, 6, 6, PX.paper) + rect(x + 6, y + 6, 2, 2, "#e05a5a") +
+    rect(x + 9, y + 3, 3, 1, "#f5c242") + rect(x + 8, y + 4, 1, 1, PX.outline);
+}
+
+function corkboard(x, y) {
+  return box(x, y, 30, 18, "#c9955c") + box(x + 3, y + 3, 7, 6, PX.paper) + rect(x + 6, y + 3, 1, 1, "#e05a5a") + box(x + 12, y + 2, 6, 8, "#fff36f") +
+    rect(x + 14, y + 2, 1, 1, "#5a8be0") + box(x + 20, y + 4, 7, 6, "#bfe3f2") + rect(x + 22, y + 7, 3, 2, "#7cc35a") + rect(x + 23, y + 4, 1, 1, "#e05a5a") +
+    box(x + 5, y + 11, 8, 5, "#ffd0d9") + box(x + 16, y + 12, 9, 4, PX.paper, "#9aa3ad");
+}
+
+function roadmap(x, y) {
+  let s = box(x, y, 38, 18, "#fbfdff") + rect(x + 3, y + 9, 32, 1, PX.metalDark);
+  ["#5cc28f", "#5cc28f", "#f5c242", "#9aa3ad", "#9aa3ad"].forEach((c, i) => {
+    s += box(x + 4 + i * 7, y + 7, 5, 5, c) + rect(x + 6 + i * 7, y + (i % 2 ? 13 : 3), 1, 3, PX.metal) + rect(x + 4 + i * 7, y + (i % 2 ? 15 : 2), 5, 1, c);
+  });
+  return s;
+}
+
+function lineChart(x, y) {
+  let s = box(x, y, 28, 18, "#fbfdff") + rect(x + 3, y + 3, 1, 12, PX.metalDark) + rect(x + 3, y + 14, 22, 1, PX.metalDark);
+  [[6, 12], [9, 11], [12, 12], [15, 9], [18, 7], [21, 5]].forEach(([dx, dy], i, all) => {
+    s += rect(x + dx, y + dy, 3, 1, "#5cc28f") + (i === all.length - 1 ? rect(x + dx + 2, y + dy - 1, 2, 2, "#22744c", "amb-blink") : "");
+  });
+  return s;
+}
+
+function stringLights(x, y) {
+  let s = rect(x, y + 1, 40, 1, PX.outline);
+  ["#e05a5a", "#f5c242", "#5cc28f", "#6fa3ef", "#ff6fb5", "#f5c242", "#5cc28f"].forEach((c, i) => {
+    s += rect(x + 2 + i * 6, y + 2, 1, 2 + (i % 2), PX.outline) + rect(x + 1 + i * 6, y + 4 + (i % 2), 3, 3, c, i % 2 ? "amb-blink" : "amb-blink slow");
+  });
+  return s;
+}
+
+function exitSign(x, y) {
+  return box(x, y, 16, 8, "#2f8a5b") + rect(x + 2, y + 2, 3, 4, PX.paper) + rect(x + 6, y + 2, 1, 4, PX.paper) + rect(x + 8, y + 2, 1, 4, PX.paper) +
+    rect(x + 10, y + 2, 4, 1, PX.paper) + rect(x + 11, y + 3, 2, 3, PX.paper) + rect(x + 1, y + 8, 14, 1, "#b9ecfb", "amb-blink slow");
+}
+
+function wallGuitar(x, y) {
+  return rect(x + 4, y, 2, 12, "#8a5a2b") + box(x + 3, y - 1, 4, 3, "#3d2b1f") + box(x + 1, y + 9, 8, 9, "#e07a5f") + rect(x + 4, y + 12, 2, 2, PX.outline) + rect(x + 4, y + 2, 1, 14, PX.paper);
+}
+
+function wallMirror(x, y) {
+  return box(x, y, 14, 18, "#d9a441") + rect(x + 2, y + 2, 10, 14, "#dff4fc") + rect(x + 3, y + 3, 2, 5, "#ffffff") + rect(x + 6, y + 4, 1, 3, "#ffffff");
+}
+
+function cuckooClock(x, y) {
+  return box(x + 3, y - 1, 6, 3, PX.woodDark) + box(x, y + 2, 12, 11, PX.woodFront) + box(x + 3, y + 4, 6, 6, PX.paper) + rect(x + 6, y + 5, 1, 2, PX.outline) + rect(x + 6, y + 7, 2, 1, PX.outline) +
+    group("amb-wiggle", rect(x + 5, y + 13, 1, 5, PX.metalDark) + rect(x + 4, y + 18, 3, 2, "#d9a441"));
+}
+
+function bookLedge(x, y) {
+  const books = ["#e05a5a", "#5a8be0", "#f5c242", "#5cc28f", "#a98ae6", "#ee9a48", "#e8738a"];
+  let s = rect(x, y + 13, 30, 2, PX.woodFront) + rect(x + 1, y + 15, 2, 2, PX.woodDark) + rect(x + 27, y + 15, 2, 2, PX.woodDark);
+  books.forEach((c, i) => { s += rect(x + 2 + i * 3, y + 5 + (i % 3), 2, 8 - (i % 3), c); });
+  return s + plant(x + 24, y + 6);
+}
+
+function hangingPlants(x, y) {
+  let s = "";
+  [[2, 8], [11, 12], [20, 6]].forEach(([dx, len]) => {
+    s += rect(x + dx + 2, y - 2, 1, 4, PX.metalDark) + box(x + dx, y + 2, 6, 4, PX.pot) + rect(x + dx + 1, y + 6, 1, len, PX.leaf) + rect(x + dx + 4, y + 6, 1, len - 3, PX.leafLight) +
+      rect(x + dx, y + 7, 1, 2, PX.leafDark) + rect(x + dx + 5, y + 8, 1, 2, PX.leaf);
+  });
+  return s;
+}
+
+function wallTv(x, y) {
+  return box(x, y, 34, 18, "#1f2633") + rect(x + 2, y + 2, 30, 11, "#3f6fb0") + rect(x + 4, y + 4, 8, 7, "#f4a3a3") + rect(x + 6, y + 5, 4, 3, "#ffe0c7") +
+    rect(x + 14, y + 5, 14, 1, PX.paper) + rect(x + 14, y + 8, 10, 1, PX.paper) + rect(x + 2, y + 14, 30, 2, "#e05a5a") + rect(x + 4, y + 14, 12, 2, PX.paper, "amb-blink slow");
+}
+
+function certificates(x, y) {
+  const one = (cx, cy) => box(cx, cy, 12, 9, "#d9a441") + rect(cx + 2, cy + 2, 8, 5, PX.paper) + rect(cx + 3, cy + 3, 5, 1, PX.metal) + rect(cx + 7, cy + 5, 2, 2, "#e05a5a");
+  return one(x, y) + one(x + 14, y + 2) + one(x + 4, y + 11);
+}
+
+function skateboard(x, y) {
+  return box(x, y + 6, 26, 4, "#e8738a") + rect(x + 2, y + 7, 22, 1, "#f5c242") + box(x + 3, y + 10, 4, 3, PX.metalDark) + box(x + 19, y + 10, 4, 3, PX.metalDark) +
+    rect(x + 12, y + 3, 2, 3, PX.metalDark);
+}
+
+function worldClocks(x, y) {
+  let s = "";
+  [0, 12, 24].forEach((dx, i) => {
+    s += box(x + dx, y + 2, 10, 10, "#fbfdff") + rect(x + dx + 4, y + 4 + i, 1, 3, PX.outline) + rect(x + dx + 5, y + 6, 2 + (i % 2), 1, PX.outline) + rect(x + dx + 2, y + 14, 6, 2, ["#e05a5a", "#5a8be0", "#5cc28f"][i]);
+  });
+  return s;
+}
+
+function quotePoster(x, y) {
+  return box(x, y, 18, 19, "#2a2433") + rect(x + 3, y + 3, 12, 3, "#f5c242") + rect(x + 3, y + 8, 8, 2, PX.paper) + rect(x + 3, y + 11, 11, 2, PX.paper) + rect(x + 3, y + 14, 6, 2, "#ff6fb5");
+}
+
+function smallBoxes(x, y, kind) {
+  if (kind === "thermostat") return box(x, y + 4, 8, 9, "#f4f4f1") + rect(x + 2, y + 6, 4, 3, "#9fe7ff") + rect(x + 3, y + 10, 2, 1, "#e05a5a", "amb-blink slow");
+  if (kind === "fireExt") return box(x + 1, y + 3, 6, 14, "#e05a5a") + rect(x + 3, y, 2, 3, PX.metalDark) + rect(x + 5, y + 1, 3, 1, PX.outline) + rect(x + 2, y + 8, 4, 3, PX.paper);
+  if (kind === "firstAid") return box(x, y + 4, 12, 11, "#f4f4f1") + rect(x + 5, y + 6, 2, 7, "#e05a5a") + rect(x + 3, y + 8, 6, 3, "#e05a5a");
+  return box(x, y + 2, 10, 15, "#3d424e") + box(x + 2, y + 4, 6, 5, "#1f2633") + box(x + 3, y + 11, 4, 4, "#1f2633") + rect(x + 4, y + 6, 2, 1, "#9aa3ad", "amb-blink");
+}
+
 function worldMap(x, y) {
   return box(x, y, 32, 18, "#bfe3f2") + rect(x + 4, y + 4, 8, 5, "#7cc35a") + rect(x + 6, y + 9, 4, 5, "#7cc35a") +
     rect(x + 15, y + 3, 6, 6, "#7cc35a") + rect(x + 16, y + 9, 4, 6, "#7cc35a") + rect(x + 23, y + 4, 6, 5, "#7cc35a");
@@ -779,6 +919,7 @@ function serverRack(x, y) {
 
 // The office cat asleep on a cushion: the tail flicks and the ears twitch now and then.
 function officeCat(x, y, color = "#e8a25c") {
+  // (the sleeping body is in the "pet-body" group: it is hidden while the pet walks around)
   const dark = shade(color, -45);
   const p = new Map();
   fill(p, 2, 3, 11, 7, color); fill(p, 1, 4, 1, 6, color); fill(p, 3, 2, 6, 2, color);
@@ -789,8 +930,71 @@ function officeCat(x, y, color = "#e8a25c") {
   const tail = new Map();
   fill(tail, 12, 5, 13, 6, color); fill(tail, 13, 3, 14, 4, dark);
   return box(x - 1, y + 6, 18, 5, "#c27ac9") + rect(x, y + 7, 16, 1, shade("#c27ac9", 30)) +
-    group("cat-body", pixelsToRects(withOutline(p), x, y) + group("amb-tail", pixelsToRects(withOutline(tail), x, y)) +
+    group("pet-body", pixelsToRects(withOutline(p), x, y) + group("amb-tail", pixelsToRects(withOutline(tail), x, y)) +
       group("amb-zzz", glyph([[0, 0], [1, 0], [2, 0], [1, 1], [0, 2], [1, 2], [2, 2]], x + 2, y - 7, "#ffffff")));
+}
+
+// The office dog asleep in its basket.
+function officeDog(x, y, color = "#c98a5a") {
+  const dark = shade(color, -45);
+  const p = new Map();
+  fill(p, 2, 3, 12, 7, color); fill(p, 0, 4, 3, 7, color); dots(p, [[1, 3], [2, 3]], dark);
+  dots(p, [[1, 5]], PX.outline); p.set("0,6", PX.outline);
+  dots(p, [[8, 4], [10, 5]], dark);
+  const tail = new Map();
+  fill(tail, 13, 4, 14, 5, color);
+  return box(x - 2, y + 5, 20, 6, "#8a5a2b") + rect(x - 1, y + 6, 18, 1, "#b4793a") +
+    group("pet-body", pixelsToRects(withOutline(p), x, y) + group("amb-tail", pixelsToRects(withOutline(tail), x, y)) +
+      group("amb-zzz", glyph([[0, 0], [1, 0], [2, 0], [1, 1], [0, 2], [1, 2], [2, 2]], x + 2, y - 7, "#ffffff")));
+}
+
+function birdCage(x, y) {
+  return rect(x + 6, y + 6, 2, 12, PX.metalDark) + box(x + 3, y + 17, 8, 2, PX.metalDark) + box(x + 1, y - 8, 12, 15, "#fff8d6", "#a77b00") +
+    [3, 6, 9].map((dx) => rect(x + dx, y - 7, 1, 13, "#d9a441")).join("") + rect(x + 2, y + 2, 10, 1, "#8a5a2b") +
+    group("amb-wiggle", rect(x + 5, y - 2, 4, 4, "#f5c242") + rect(x + 9, y - 1, 1, 1, "#ee9a48") + rect(x + 7, y - 1, 1, 1, PX.outline));
+}
+
+function treadmill(x, y) {
+  return box(x, y + 10, 22, 5, "#3d424e") + rect(x + 1, y + 11, 20, 1, "#5d6470", "amb-blink") + rect(x + 18, y - 6, 2, 16, PX.metalDark) +
+    box(x + 14, y - 9, 8, 5, "#2a2433") + rect(x + 16, y - 7, 4, 1, "#5cc28f", "amb-blink slow") + rect(x + 2, y + 15, 2, 2, PX.outline) + rect(x + 18, y + 15, 2, 2, PX.outline);
+}
+
+function floorSpeaker(x, y) {
+  return box(x, y - 8, 12, 24, "#2a2433") + box(x + 2, y - 5, 8, 8, "#3d424e") + rect(x + 4, y - 3, 4, 4, "#9aa3ad", "amb-blink") +
+    box(x + 3, y + 6, 6, 6, "#3d424e") + rect(x + 5, y + 8, 2, 2, "#9aa3ad", "amb-blink slow");
+}
+
+function snackShelf(x, y) {
+  let s = box(x, y - 8, 18, 24, PX.woodFront) + rect(x + 1, y, 16, 1, PX.woodDark) + rect(x + 1, y + 8, 16, 1, PX.woodDark);
+  [["#e05a5a", 2, -6], ["#f5c242", 7, -5], ["#5cc28f", 12, -6], ["#6fa3ef", 2, 2], ["#ff8fb1", 8, 3], ["#ee9a48", 13, 2], ["#a98ae6", 3, 10], ["#f3e2c7", 9, 10]]
+    .forEach(([c, dx, dy]) => { s += rect(x + dx, y + dy, 4, 5, c); });
+  return s;
+}
+
+function bikeStand(x, y) {
+  return box(x, y + 6, 9, 9, "#3d424e") + rect(x + 2, y + 8, 5, 5, PX.floor) + box(x + 15, y + 6, 9, 9, "#3d424e") + rect(x + 17, y + 8, 5, 5, PX.floor) +
+    rect(x + 4, y + 4, 16, 2, "#e05a5a") + rect(x + 8, y, 2, 5, "#e05a5a") + rect(x + 6, y - 1, 6, 2, PX.outline) + rect(x + 18, y, 2, 5, "#e05a5a") + rect(x + 17, y - 1, 5, 1, PX.outline);
+}
+
+function sketchEasel(x, y) {
+  return rect(x + 2, y + 8, 1, 9, PX.woodDark) + rect(x + 15, y + 8, 1, 9, PX.woodDark) + box(x, y - 8, 18, 17, "#fbfdff") +
+    rect(x + 3, y - 5, 8, 1, "#5a8be0") + rect(x + 3, y - 2, 11, 1, "#e05a5a") + box(x + 4, y + 1, 5, 5, "#fff36f") + rect(x + 11, y + 2, 4, 3, "#5cc28f");
+}
+
+function foosball(x, y) {
+  let s = box(x, y + 2, 30, 10, "#2f7d4f") + rect(x + 14, y + 3, 2, 8, PX.paper) + rect(x + 2, y + 12, 3, 5, PX.woodDark) + rect(x + 25, y + 12, 3, 5, PX.woodDark);
+  [5, 11, 18, 24].forEach((dx, i) => { s += rect(x + dx, y, 1, 14, PX.metal) + rect(x + dx - 1, y + 4 + (i % 2) * 3, 3, 3, i % 2 ? "#e05a5a" : "#5a8be0", "amb-wiggle"); });
+  return s;
+}
+
+function massageChair(x, y) {
+  return box(x + 1, y - 8, 16, 16, "#3d2b1f") + rect(x + 3, y - 6, 12, 5, "#5b3a29") + box(x, y + 2, 4, 12, "#2a2433") + box(x + 14, y + 2, 4, 12, "#2a2433") +
+    box(x + 3, y + 7, 12, 8, "#5b3a29") + rect(x + 15, y + 4, 2, 1, "#5cc28f", "amb-blink slow");
+}
+
+function telescope(x, y) {
+  return rect(x + 6, y + 2, 1, 14, PX.metalDark) + rect(x + 3, y + 8, 1, 8, PX.metalDark) + rect(x + 9, y + 8, 1, 8, PX.metalDark) +
+    box(x, y - 4, 13, 5, "#f4f4f1") + box(x + 11, y - 6, 4, 9, "#9aa3ad") + rect(x - 1, y - 2, 2, 2, PX.outline);
 }
 
 function recyclingBins(x, y) {
@@ -828,7 +1032,20 @@ const DESK_MODELS = {
   glass: () => ({ top: "#cfeaf5", front: "#9aa9b4", edge: "#76828c" }),
 };
 // What can differ from desk to desk in one room. Each person's set comes from their id and the room seed.
-const DESK_SHAPES = ["panel", "legs", "rounded", "curved", "lshape", "drawer", "trestle", "legs"];
+const DESK_SHAPES = ["panel", "legs", "rounded", "curved", "lshape", "drawer", "trestle", "lshapeLeft", "pedestal", "hairpin", "wave", "dshape", "cart", "crate"];
+// The manager's desks are wider and deeper.
+const EXEC_SHAPES = ["executive", "execGlass", "execCurved", "execWhite", "execAntique", "execL"];
+const EXEC_CHAIRS = ["exec", "execBlack", "execWing", "execWhite"];
+const GEAR_LABELS = {
+  panel: "panel desk", legs: "open desk", rounded: "rounded desk", curved: "curved desk", lshape: "L-shaped desk", drawer: "desk with drawers",
+  trestle: "trestle desk", lshapeLeft: "L-shaped desk", pedestal: "pedestal desk", hairpin: "hairpin-leg desk", wave: "wave desk", dshape: "round-end desk",
+  cart: "rolling desk", crate: "crate desk", executive: "panelled executive desk", execGlass: "glass executive desk", execCurved: "curved executive desk",
+  execWhite: "white executive desk", execAntique: "antique executive desk", execL: "executive desk with a side wing",
+  laptop: "laptop", laptopDark: "dark laptop", screen: "monitor", side: "side screen and keyboard", dual: "laptop and second screen", tablet: "tablet",
+  mug: "mug", mugColor: "coloured mug", tea: "tea", takeaway: "takeaway coffee", glass: "juice", bottle: "water bottle", can: "soda can", boba: "bubble tea", none: "nothing to drink",
+  role: "the tools of the job", photo: "a framed photo", lamp: "a desk lamp", plant: "a plant", cactus: "a cactus", books: "a pile of books", duck: "a rubber duck",
+  robot: "a toy robot", fan: "a fan", stickies: "sticky notes", globe: "a globe",
+};
 const DESK_WIDTHS = [34, 38, 40, 42];
 const COMPUTERS = ["laptop", "laptop", "laptopDark", "screen", "side", "dual", "tablet"];
 const DRINKS = ["mug", "mugColor", "tea", "takeaway", "glass", "bottle", "can", "boba", "none"];
@@ -836,13 +1053,23 @@ const DESK_ITEMS = ["role", "role", "photo", "lamp", "plant", "cactus", "books",
 const LID_COLORS = ["#8d96a3", "#cfd6de", "#3d424e", "#e8c7a0"];
 const CUP_COLORS = ["#e8738a", "#5fb3b3", "#f5c242", "#7d8fe0"];
 
+// A person's desk and gear. deskSeed changes when the customer rolls a new desk for them.
 function gearFor(agent, seed = 0) {
-  const h = hashOf(`${agent.id}#${seed}`);
+  const h = hashOf(`${agent.id}#${seed}#${agent.deskSeed || 0}`);
   const at = (list, shift) => list[(h >>> shift) % list.length];
   return {
     shape: at(DESK_SHAPES, 0), width: at(DESK_WIDTHS, 4), computer: at(COMPUTERS, 8), drink: at(DRINKS, 12),
-    item: at(DESK_ITEMS, 16), tint: (h >>> 21) % 4,
+    item: at(DESK_ITEMS, 16), tint: (h >>> 21) % 4, exec: at(EXEC_SHAPES, 3), execChair: at(EXEC_CHAIRS, 7),
   };
+}
+
+// The same in words, for the staff panel.
+function gearSummary(agent, seed = 0) {
+  const gear = gearFor(agent, seed);
+  const boss = agent.id === "pm";
+  const drink = gear.drink === "none" && boss ? "mug" : gear.drink;
+  return [GEAR_LABELS[boss ? gear.exec : gear.shape], GEAR_LABELS[boss ? "dual" : gear.computer], GEAR_LABELS[drink],
+    GEAR_LABELS[boss ? "role" : gear.item]];
 }
 
 // A desk of the given shape. Returns the drawing and whether the space under the top is open
@@ -857,6 +1084,8 @@ function deskShape(x, y, w, model, shape) {
     return pixelsToRects(withOutline(p), x + 1, y + 1);
   };
   const W = w - 3;
+  // The gold name plate on the front of a manager's desk.
+  const plate = (dy, shift = 0) => box(x + Math.floor(w / 2) - 7 + shift, y + dy, 14, 5, "#f5c242", "#a77b00") + rect(x + Math.floor(w / 2) - 4 + shift, y + dy + 2, 8, 1, "#8a5a2b");
   switch (shape) {
     case "legs":
       return { open: true, svg: box(x + 1, y + 6, 4, 8, c.front) + box(x + w - 5, y + 6, 4, 8, c.front) + rect(x + 5, y + 9, w - 10, 1, c.edge) + top };
@@ -874,11 +1103,50 @@ function deskShape(x, y, w, model, shape) {
       return { open: false, svg: top + box(x, y + 6, w, 6, c.front) + rect(x + 1, y + 10, w - 2, 1, c.edge) +
         box(x + w - 12, y + 6, 12, 8, c.top) + rect(x + w - 11, y + 6, 10, 1, c.top) + rect(x + w - 11, y + 7, 10, 1, hi) +
         box(x + w - 12, y + 13, 12, 4, c.front) };
+    case "lshapeLeft":
+      return { open: false, svg: top + box(x, y + 6, w, 6, c.front) + rect(x + 1, y + 10, w - 2, 1, c.edge) +
+        box(x, y + 6, 12, 8, c.top) + rect(x + 1, y + 6, 10, 1, c.top) + rect(x + 1, y + 7, 10, 1, hi) + box(x, y + 13, 12, 4, c.front) };
+    case "pedestal":
+      return { open: true, svg: [x + 1, x + w - 11].map((px) => box(px, y + 6, 10, 8, c.front) + rect(px + 2, y + 8, 6, 1, c.edge) + rect(px + 2, y + 11, 6, 1, c.edge)).join("") + top };
+    case "hairpin":
+      return { open: true, svg: [x + 2, x + w - 6].map((px) => rect(px, y + 7, 1, 7, PX.metalDark) + rect(px + 3, y + 7, 1, 7, PX.metalDark) + rect(px + 1, y + 13, 2, 1, PX.metalDark)).join("") +
+        box(x, y, w, 6, c.top) + rect(x + 1, y + 1, w - 2, 1, hi) };
+    case "wave": {
+      const rows = [[1, W - 1, 0, 0, c.top], [0, W, 1, 4, c.top], [1, W - 1, 1, 1, hi], [0, W, 5, 8, c.front]];
+      for (let i = 1; i < W - 2; i += 6) rows.push([i, i + 3, 9, 10, c.front]);
+      return { open: false, svg: rounded(rows) };
+    }
+    case "dshape":
+      return { open: false, svg: box(x + Math.floor(w / 2) - 4, y + 6, 8, 7, c.front) + box(x + Math.floor(w / 2) - 8, y + 12, 16, 2, c.edge) +
+        rounded([[2, W - 2, 0, 0, c.top], [0, W, 1, 3, c.top], [2, W - 2, 4, 4, c.top], [2, W - 2, 1, 1, hi]]) };
+    case "cart":
+      return { open: false, svg: top + box(x + 2, y + 6, w - 4, 6, c.front) + rect(x + 4, y + 8, w - 8, 2, c.edge) + box(x + 3, y + 11, 4, 4, "#2a2433") + box(x + w - 7, y + 11, 4, 4, "#2a2433") };
+    case "crate":
+      return { open: true, svg: [x + 1, x + w - 11].map((px) => box(px, y + 6, 10, 8, "#c9955c") + rect(px + 1, y + 8, 8, 1, "#a8743d") + rect(px + 1, y + 11, 8, 1, "#a8743d") + rect(px + 4, y + 7, 1, 6, "#a8743d")).join("") +
+        top + [x + Math.floor(w / 3), x + Math.floor((2 * w) / 3)].map((px) => rect(px, y + 2, 1, 4, c.edge)).join("") };
     case "executive":
       // The manager's desk: deep, panelled front, gold trim and a name plate.
-      return { open: false, svg: box(x, y, w, 8, c.top) + rect(x + 1, y + 1, w - 2, 1, hi) + box(x, y + 7, w, 10, c.front) +
-        rect(x + 1, y + 8, w - 2, 1, "#d9a441") + [x + 3, x + w - 17].map((px) => box(px, y + 10, 14, 5, shade(c.front, -14), c.edge)).join("") +
-        box(x + Math.floor(w / 2) - 7, y + 10, 14, 5, "#f5c242", "#a77b00") + rect(x + Math.floor(w / 2) - 4, y + 12, 8, 1, "#8a5a2b") };
+      return { open: false, h: 17, svg: box(x, y, w, 8, c.top) + rect(x + 1, y + 1, w - 2, 1, hi) + box(x, y + 7, w, 10, c.front) +
+        rect(x + 1, y + 8, w - 2, 1, "#d9a441") + [x + 3, x + w - 17].map((px) => box(px, y + 10, 14, 5, shade(c.front, -14), c.edge)).join("") + plate(10) };
+    case "execGlass":
+      // Glass on a chrome frame, with a smoked panel in front.
+      return { open: true, h: 16, svg: box(x + 2, y + 6, 4, 11, "#9aa3ad") + box(x + w - 6, y + 6, 4, 11, "#9aa3ad") + rect(x + 6, y + 14, w - 12, 1, "#76828c") +
+        rect(x + 8, y + 7, w - 16, 6, "rgba(60,80,100,.4)") + box(x, y, w, 7, "#cfeaf5") + rect(x + 1, y + 1, w - 2, 1, "#ffffff") + rect(x + 6, y + 3, 10, 1, "#ffffff") + plate(8) };
+    case "execCurved":
+      return { open: false, h: 17, svg: rounded([[2, W - 2, 0, 0, c.top], [0, W, 1, 5, c.top], [2, W - 2, 1, 1, hi], [0, W, 6, 9, c.front], [0, W, 6, 6, "#d9a441"],
+        [3, W - 3, 10, 12, c.front], [8, W - 8, 13, 14, c.front]]) + plate(10) };
+    case "execWhite":
+      // White lacquer with a wooden side and a gold line.
+      return { open: false, h: 17, svg: box(x, y, w, 8, "#f4f4f1") + rect(x + 1, y + 1, w - 2, 1, "#ffffff") + box(x, y + 7, w, 10, "#e3e5e8") + rect(x + 1, y + 8, w - 2, 1, "#d9a441") +
+        box(x + w - 18, y + 7, 18, 10, PX.wood) + rect(x + w - 16, y + 11, 14, 1, PX.woodDark) + plate(10, -8) };
+    case "execAntique":
+      // Two carved pedestals with gold knobs and an arch between them.
+      return { open: true, h: 17, svg: [x, x + w - 18].map((px) => box(px, y + 7, 18, 10, c.front) + box(px + 2, y + 9, 14, 3, shade(c.front, -14), c.edge) + box(px + 2, y + 13, 14, 3, shade(c.front, -14), c.edge) +
+        rect(px + 8, y + 10, 2, 1, "#f5c242") + rect(px + 8, y + 14, 2, 1, "#f5c242")).join("") + rect(x + 18, y + 7, w - 36, 3, c.front) + rect(x + 18, y + 10, w - 36, 1, c.edge) +
+        box(x, y, w, 8, c.top) + rect(x + 1, y + 1, w - 2, 1, hi) + rect(x + 1, y + 6, w - 2, 1, "#d9a441") };
+    case "execL":
+      return { open: false, h: 20, svg: box(x, y, w, 8, c.top) + rect(x + 1, y + 1, w - 2, 1, hi) + box(x, y + 7, w, 9, c.front) + rect(x + 1, y + 8, w - 2, 1, "#d9a441") +
+        box(x + w - 18, y + 7, 18, 9, c.top) + rect(x + w - 17, y + 7, 16, 1, c.top) + rect(x + w - 17, y + 8, 16, 1, hi) + box(x + w - 18, y + 15, 18, 5, c.front) + plate(10, -9) };
     default:
       return { open: false, svg: top + box(x, y + 6, w, 6, c.front) + rect(x + 1, y + 10, w - 2, 1, c.edge) };
   }
@@ -949,11 +1217,16 @@ function deskItemSvg(kind, role, x, deskY) {
 // Chair behind a character that faces the viewer.
 function chairBackSvg(cx, y, model) {
   if (model === "stool") return "";
-  if (model === "exec") {
-    // The manager's high-backed leather chair with arm rests.
-    return box(cx - 3, y + 1, 20, 23, "#5b3a29") + rect(cx - 2, y + 2, 18, 2, "#7a4f38") +
-      [[1, 6], [12, 6], [1, 11], [12, 11]].map(([dx, dy]) => rect(cx + dx, y + dy, 1, 1, "#d9a441")).join("") +
-      box(cx - 6, y + 13, 4, 9, "#3d2b1f") + box(cx + 16, y + 13, 4, 9, "#3d2b1f");
+  if (model.startsWith("exec")) {
+    // The manager's high-backed chairs with arm rests: brown leather, black, a wing chair, white and gold.
+    const [leather, light, arm, stud] = {
+      exec: ["#5b3a29", "#7a4f38", "#3d2b1f", "#d9a441"], execBlack: ["#2a2433", "#4b4458", "#9aa3ad", "#cfd6de"],
+      execWing: ["#7a2e3a", "#9c4553", "#5b1f29", "#f5c242"], execWhite: ["#f4f4f1", "#ffffff", "#d9a441", "#d9a441"],
+    }[model] || ["#5b3a29", "#7a4f38", "#3d2b1f", "#d9a441"];
+    const wings = model === "execWing" ? box(cx - 5, y + 2, 4, 12, leather) + box(cx + 15, y + 2, 4, 12, leather) : "";
+    return box(cx - 3, y + 1, 20, 23, leather) + rect(cx - 2, y + 2, 18, 2, light) + wings +
+      [[1, 6], [12, 6], [1, 11], [12, 11]].map(([dx, dy]) => rect(cx + dx, y + dy, 1, 1, stud)).join("") +
+      box(cx - 6, y + 13, 4, 9, arm) + box(cx + 16, y + 13, 4, 9, arm);
   }
   if (model === "gaming") {
     return box(cx - 2, y + 5, 18, 19, "#2a2433") + rect(cx + 5, y + 6, 4, 17, PX.accent) + box(cx + 2, y + 2, 10, 5, "#2a2433");
@@ -1037,22 +1310,22 @@ function workstationSvg(agent, x, y, { wide = false, desk = "wood", chair = "off
   const deskY = y + 22;
   const dw = joined ? deskW : wide ? w : gear.width;
   const dx = joined ? deskX : wide ? x + 2 : cx + 7 - Math.floor(dw / 2);
-  const shape = joined ? "panel" : wide ? "executive" : gear.shape;
-  const open = ["legs", "trestle", "drawer"].includes(shape);
+  const shape = joined ? "panel" : wide ? gear.exec : gear.shape;
+  const open = ["legs", "trestle", "drawer", "pedestal", "hairpin", "crate"].includes(shape);
   // Most desks follow the room; some people brought their own, and open frames may carry a glass top.
-  const model = wide ? "walnut" : joined ? desk : open && gear.tint === 2 ? "glass" : gear.tint === 3 ? "birch" : desk;
+  const model = wide ? (gear.tint === 1 ? "dark" : "walnut") : joined ? desk : open && gear.tint === 2 ? "glass" : gear.tint === 3 ? "birch" : desk;
   const d = deskShape(dx, deskY, dw, model, shape);
   const leftX = joined || wide ? x + 4 : dx + 2;
   const rightX = (joined || wide ? x + w : dx + dw) - 7;
   const computer = wide ? "dual" : gear.computer;
   const sideScreen = computer === "side" || computer === "dual";
   const skin = (agent.look && agent.look.skin) || "#ffe0c7";
-  const height = d.svg && shape === "executive" ? 17 : 12;
+  const height = d.h || 12;
   // data-idle picks this person's habits: what they do without work and how they look when busy.
   return `
   <g class="ws st-idle${wide ? " boss" : ""}" data-agent="${escAttr(agent.id)}" data-idle="${hashOf(agent.id) % 6}">
     ${rect(dx + 2, deskY + height, dw - 4, 2, "rgba(90,60,30,.18)")}
-    ${chairBackSvg(cx, y, wide ? "exec" : chair)}
+    ${chairBackSvg(cx, y, wide ? gear.execChair : chair)}
     ${characterSvg(agent, cx, y + 6)}
     <rect class="glow" x="${cx + 2}" y="${y + 9}" width="10" height="7" fill="#9fe7ff"/>
     <g class="phone">${box(cx + 5, y + 16, 4, 6, "#2a2433")}${rect(cx + 6, y + 17, 2, 3, "#9fe7ff")}</g>
@@ -1156,7 +1429,40 @@ function gardenCorner(x, y) {
     plant(x + 48, y + 26);
 }
 
+function beanbag(x, y, c) {
+  const p = new Map();
+  fill(p, 2, 0, 7, 1, c); fill(p, 0, 2, 9, 6, c); fill(p, 1, 7, 8, 7, shade(c, -30)); fill(p, 3, 2, 6, 3, shade(c, 25));
+  return pixelsToRects(withOutline(p), x, y);
+}
+
+// Gaming corner: a big screen with a console and two beanbags.
+function gamingCorner(x, y) {
+  return box(x + 14, y + 2, 32, 15, "#2a2433") + rect(x + 16, y + 4, 28, 11, "#3f6fb0", "tv-screen") + rect(x + 19, y + 7, 9, 1, "#9fe7ff", "tv-line") +
+    rect(x + 19, y + 11, 15, 1, "#9fe7ff", "tv-line") + box(x + 24, y + 19, 12, 4, "#f4f4f1") + rect(x + 26, y + 20, 2, 1, "#5cc28f", "amb-blink slow") +
+    beanbag(x + 12, y + 36, "#e8738a") + beanbag(x + 38, y + 36, "#5fb3b3");
+}
+
+// Nap corner: two sleeping pods and a moon lamp.
+function napCorner(x, y) {
+  const pod = (px, py, c) => box(px, py, 34, 15, "#e9eef2") + rect(px + 2, py + 2, 30, 11, "#d7dbdf") + box(px + 3, py + 3, 9, 9, PX.paper) + box(px + 13, py + 3, 19, 9, c) + rect(px + 14, py + 4, 17, 2, shade(c, 28));
+  return pod(x + 6, y + 6, "#7d8fe0") + pod(x + 6, y + 30, "#c27ac9") + box(x + 46, y + 14, 8, 8, "#fff3a6", "#a77b00") + rect(x + 48, y + 16, 3, 3, "#f5c242", "amb-blink slow") +
+    rect(x + 49, y + 22, 2, 6, PX.metalDark);
+}
+
+// Band corner: drums, a keyboard and a microphone.
+function bandCorner(x, y) {
+  return box(x + 6, y + 16, 12, 9, "#e05a5a") + rect(x + 7, y + 17, 10, 2, "#f4f4f1") + box(x + 2, y + 10, 8, 4, "#d9a441") + box(x + 15, y + 9, 8, 4, "#d9a441") +
+    rect(x + 5, y + 14, 1, 10, PX.metalDark) + rect(x + 19, y + 13, 1, 11, PX.metalDark) +
+    box(x + 30, y + 12, 26, 6, "#2a2433") + [0, 1, 2, 3, 4, 5, 6, 7].map((i) => rect(x + 32 + i * 3, y + 14, 2, 3, PX.paper)).join("") +
+    rect(x + 33, y + 18, 1, 8, PX.metalDark) + rect(x + 52, y + 18, 1, 8, PX.metalDark) +
+    rect(x + 27, y + 30, 1, 14, PX.metalDark) + box(x + 25, y + 27, 5, 4, "#9aa3ad") + box(x + 24, y + 44, 7, 2, PX.metalDark) +
+    group("amb-zzz", glyph([[2, 0], [3, 0], [2, 1], [2, 2], [2, 3], [0, 3], [1, 3], [0, 4], [1, 4]], x + 40, y + 1, "#ff6fb5"));
+}
+
 function lounge(kind, x, y) {
+  if (kind === "gaming") return gamingCorner(x, y);
+  if (kind === "nap") return napCorner(x, y);
+  if (kind === "band") return bandCorner(x, y);
   if (kind === "sofa") return sofaCorner(x + 8, y + 6);
   if (kind === "pingpong") return pingPong(x + 14, y + 14);
   if (kind === "round") return roundTable(x + 8, y + 12);
@@ -1198,6 +1504,29 @@ const LOUNGE_SPOTS = {
     { dx: 20, dy: 23, ...SEAT, back: true, use: "pond", emotes: ["🌿", "😌"] },
     { dx: 32, dy: 23, ...SEAT, back: true, use: "pond", emotes: ["🐟", "💬"] },
   ],
+  gaming: [
+    { dx: 10, dy: 27, sit: true, back: true, show: 13, use: "tv", emotes: ["🎮", "😆"] },
+    { dx: 36, dy: 27, sit: true, back: true, show: 13, use: "tv", emotes: ["🕹️", "🏆"] },
+  ],
+  nap: [{ dx: 7, dy: 6, sit: true, show: 9, emotes: ["💤", "😴"] }, { dx: 7, dy: 30, sit: true, show: 9, emotes: ["😴", "💤"] }],
+  band: [
+    { dx: 5, dy: 0, play: "dance", use: "band", emotes: ["🥁", "🎶"] },
+    { dx: 37, dy: 18, back: true, play: "dance", use: "band", emotes: ["🎹", "🎵"] },
+    { dx: 20, dy: 30, play: "dance", use: "band", emotes: ["🎤", "🎶"] },
+  ],
+};
+
+const LOUNGE_INFO = {
+  meeting: { name: "Meeting table", about: "Four chairs and yesterday's notes.", does: "Up to four people sit down and talk." },
+  sofa: { name: "Sofa and TV", about: "The quiet end of the room.", does: "Two people sit on the sofa; the TV turns on for them." },
+  pingpong: { name: "Ping-pong table", about: "Best of three decides who writes the tests.", does: "Two people play a match; the ball flies over the net." },
+  round: { name: "Round table", about: "Small talks and coffee.", does: "Up to four people sit around the table and chat." },
+  kitchen: { name: "Kitchen", about: "Counter, coffee machine and a fridge.", does: "People sit on the stools with a coffee or look into the fridge." },
+  library: { name: "Reading corner", about: "Two bookshelves and a comfortable armchair.", does: "One person reads in the armchair, another browses the shelves." },
+  garden: { name: "Indoor garden", about: "Plants, a pond and a bench.", does: "Two people sit on the bench and watch the fish." },
+  gaming: { name: "Gaming corner", about: "A big screen, a console and two beanbags.", does: "Two people play on the beanbags; the screen turns on." },
+  nap: { name: "Nap pods", about: "Twenty minutes of sleep count as work here.", does: "Two people lie down for a nap." },
+  band: { name: "Band corner", about: "Drums, a keyboard and a microphone.", does: "Up to three people play a song together." },
 };
 
 // ---------- room style ----------
@@ -1231,10 +1560,23 @@ const LAYOUTS = ["rows", "cubicles", "pods", "bench", "stagger", "duo"];
 const LOUNGES = ["meeting", "sofa", "pingpong", "round", "kitchen", "library", "garden"];
 const DESKS = ["wood", "white", "dark"];
 const CHAIRS = ["office", "gaming", "stool", "mesh", "wood"];
-const WALL_DECOR = ["whiteboard", "posters", "screen", "map", "banner", "neon", "plantShelf", "clock", "kanban", "frames", "calendar", "aircon"];
-const FLOOR_EXTRAS = ["coffee", "cooler", "vending", "aquarium", "arcade", "printer", "beanbags", "lamp", "bigPlant", "servers", "cat", "bins", "coats"];
-const PM_SHELVES = ["bookshelf", "trophies", "plantShelf"];
-const CAT_COLORS = ["#e8a25c", "#5d6470", "#f4f4f1", "#3a2f3f"];
+const LOUNGES_ALL = [...LOUNGES, "gaming", "nap", "band"];
+const VACUUMS = ["disc", "mop", "drone"];
+const SHELF_INFO = {
+  bookshelf: { name: "Bookshelf", about: "The manager's books, sorted by colour." },
+  trophies: { name: "Trophy shelf", about: "Gold, silver and bronze from old projects." },
+  plantShelf: { name: "Plant shelf", about: "Two plants and a cactus that needs no care." },
+};
+const CABINET_INFO = {
+  cabinet: { name: "Filing cabinet", about: "Contracts in the top drawer, snacks in the bottom one." },
+  safe: { name: "Safe", about: "Nobody remembers the combination." },
+  minifridge: { name: "Mini fridge", about: "Cold drinks for long calls." },
+};
+const VACUUM_INFO = {
+  disc: { name: "Robot vacuum", about: "Crosses the floor all day and never complains." },
+  mop: { name: "Mopping robot", about: "Leaves the floor shiny." },
+  drone: { name: "Cleaning drone", about: "Hovers over the floor and dusts as it goes." },
+};
 
 function pickFrom(rnd, list) {
   return list[Math.floor(rnd() * list.length)];
@@ -1248,24 +1590,138 @@ function pickMany(rnd, list, count) {
 }
 
 // Everything that makes a room look the way it does, derived from one number.
-function roomStyle(seed) {
+// Wall items that fit side by side in the given width (8 pixels between them).
+function fitWall(names, space) {
+  const placed = [];
+  let used = 0;
+  for (const name of names) {
+    const w = WALL_ITEMS[name].w;
+    if (placed.length < 5 && used + w <= space) { placed.push(name); used += w + 8; }
+  }
+  return placed;
+}
+
+// Where the floor items stand along the bottom wall (null when one does not fit). The door is in the middle.
+function placeFloor(names, teamX) {
+  let ex = teamX + 2;
+  return names.map((name) => {
+    const w = FLOOR_ITEMS[name].w;
+    if (ex + w > 112 && ex < 148) ex = 150;
+    if (ex + w > teamX + 186) return null;
+    const x = ex;
+    ex += w + 6;
+    return x;
+  });
+}
+
+// Everything that makes a room look the way it does, derived from one number. Each decoration is a slot
+// ("wall.0", "floor.2", "lounge", "shelf", "cabinet", "vacuum"); `items` holds the slots the customer changed:
+// { slot: { kind, v } } where v picks a variant (a colour) of the kind.
+function roomStyle(seed, items = {}) {
   const rnd = seededRandom(seed);
-  const palette = pickFrom(rnd, PALETTES);
-  return {
+  const style = {
     seed,
-    palette,
+    palette: pickFrom(rnd, PALETTES),
     layout: pickFrom(rnd, LAYOUTS),
     pmSide: rnd() < 0.5 ? "right" : "left",
-    lounge: pickFrom(rnd, LOUNGES),
+    lounge: pickFrom(rnd, LOUNGES_ALL),
     desk: pickFrom(rnd, DESKS),
     chair: pickFrom(rnd, CHAIRS),
-    windows: 1 + Math.floor(rnd() * 3),
+    windows: 1 + Math.floor(rnd() * 2),
     roundWindows: rnd() < 0.25,
-    wallDecor: pickMany(rnd, WALL_DECOR, 2),
-    extras: pickMany(rnd, FLOOR_EXTRAS, 4),
-    pmShelf: pickFrom(rnd, PM_SHELVES),
-    catColor: pickFrom(rnd, CAT_COLORS),
+    extras: pickMany(rnd, Object.keys(FLOOR_ITEMS), 4),
+    shelf: pickFrom(rnd, Object.keys(SHELF_INFO)),
+    cabinet: pickFrom(rnd, Object.keys(CABINET_INFO)),
+    vacuum: pickFrom(rnd, VACUUMS),
   };
+  style.teamX = style.pmSide === "right" ? 6 : 72;
+  style.wallSpace = 180 - style.windows * (style.roundWindows ? 22 : 42);
+  style.wallDecor = fitWall(pickMany(rnd, Object.keys(WALL_ITEMS), Object.keys(WALL_ITEMS).length), style.wallSpace);
+
+  // The customer's own choices, when they still fit.
+  const chosen = (slot, known) => (items[slot] && known.includes(items[slot].kind) ? items[slot].kind : null);
+  style.lounge = chosen("lounge", LOUNGES_ALL) || style.lounge;
+  style.shelf = chosen("shelf", Object.keys(SHELF_INFO)) || style.shelf;
+  style.cabinet = chosen("cabinet", Object.keys(CABINET_INFO)) || style.cabinet;
+  style.vacuum = chosen("vacuum", VACUUMS) || style.vacuum;
+  style.wallDecor.forEach((_, i) => {
+    const kind = chosen(`wall.${i}`, Object.keys(WALL_ITEMS));
+    if (!kind || style.wallDecor.includes(kind)) return;
+    const next = style.wallDecor.map((name, k) => (k === i ? kind : name));
+    if (fitWall(next, style.wallSpace).length === next.length) style.wallDecor = next;
+  });
+  style.extras.forEach((_, i) => {
+    const kind = chosen(`floor.${i}`, Object.keys(FLOOR_ITEMS));
+    if (kind && !style.extras.includes(kind)) style.extras = style.extras.map((name, k) => (k === i ? kind : name));
+  });
+  style.variant = (slot) => (items[slot] && Number.isInteger(items[slot].v) ? items[slot].v : hashOf(`${seed}:${slot}`)) % 1000;
+  return style;
+}
+
+// What a slot holds: its kind, name and description, and what staff do there.
+function describeItem(style, slot) {
+  const [type, index] = slot.split(".");
+  if (type === "wall") { const kind = style.wallDecor[index]; return kind ? { kind, type: "Wall decoration", ...WALL_ITEMS[kind] } : null; }
+  if (type === "floor") { const kind = style.extras[index]; return kind ? { kind, type: FLOOR_ITEMS[kind].pet ? "Office pet" : "Furniture", ...FLOOR_ITEMS[kind] } : null; }
+  if (type === "lounge") return { kind: style.lounge, type: "Lounge", ...LOUNGE_INFO[style.lounge] };
+  if (type === "shelf") return { kind: style.shelf, type: "Manager's wall", ...SHELF_INFO[style.shelf] };
+  if (type === "cabinet") return { kind: style.cabinet, type: "Manager's corner", ...CABINET_INFO[style.cabinet] };
+  if (type === "vacuum") return { kind: style.vacuum, type: "Cleaning robot", ...VACUUM_INFO[style.vacuum], does: "It works on its own; people just step aside." };
+  return null;
+}
+
+// The kinds a slot can change to without pushing another item off the wall or the floor.
+function swapChoices(style, slot) {
+  const [type, index] = slot.split(".");
+  const i = Number(index);
+  if (type === "wall") {
+    return Object.keys(WALL_ITEMS).filter((kind) => !style.wallDecor.includes(kind) &&
+      fitWall(style.wallDecor.map((name, k) => (k === i ? kind : name)), style.wallSpace).length === style.wallDecor.length);
+  }
+  if (type === "floor") {
+    const before = placeFloor(style.extras, style.teamX);
+    return Object.keys(FLOOR_ITEMS).filter((kind) => {
+      if (style.extras.includes(kind)) return false;
+      const after = placeFloor(style.extras.map((name, k) => (k === i ? kind : name)), style.teamX);
+      return after.every((x, k) => x !== null || before[k] === null);
+    });
+  }
+  const all = { lounge: LOUNGES_ALL, shelf: Object.keys(SHELF_INFO), cabinet: Object.keys(CABINET_INFO), vacuum: VACUUMS }[type] || [];
+  return all.filter((kind) => kind !== style[type]);
+}
+
+// A picture of one item for its panel.
+function itemPreviewSvg(seed, items, slot) {
+  const style = roomStyle(seed, items);
+  const info = describeItem(style, slot);
+  if (!info) return "";
+  Object.assign(PX, BASE_PX, style.palette.colors);
+  try {
+    const [type] = slot.split(".");
+    const v = style.variant(slot);
+    let inner;
+    let viewBox;
+    if (type === "wall") { inner = rect(-4, 0, info.w + 8, 30, PX.wall) + rect(-4, 26, info.w + 8, 4, PX.wallDark) + info.draw(0); viewBox = `-4 0 ${info.w + 8} 30`; }
+    else if (type === "floor") { inner = rect(-4, 4, info.w + 8, 40, PX.floor) + info.draw(0, 40, v); viewBox = `-4 4 ${info.w + 8} 40`; }
+    else if (type === "lounge") { inner = rect(0, -10, 64, 70, PX.floor) + lounge(style.lounge, 0, 0); viewBox = "0 -10 64 70"; }
+    else if (type === "shelf") { inner = rect(-2, 0, 38, 30, PX.wall) + rect(-2, 26, 38, 4, PX.wallDark) + shelfSvg(style.shelf, 0); viewBox = "-2 0 38 30"; }
+    else if (type === "cabinet") { inner = rect(-2, 8, 26, 24, PX.wall) + rect(-2, 28, 26, 4, PX.wallDark) + cabinetSvg(style.cabinet, 1, 15); viewBox = "-2 8 26 24"; }
+    else return vacuumSvg(style.vacuum, v).replace('class="walker-svg"', 'class="item-preview"');
+    return `<svg class="item-preview" viewBox="${viewBox}" shape-rendering="crispEdges" aria-hidden="true">${inner}</svg>`;
+  } finally {
+    Object.assign(PX, BASE_PX);
+  }
+}
+
+// What stands or hangs in the manager's corner.
+function shelfSvg(kind, x) {
+  return { bookshelf: bookshelf(x + 2, 6), trophies: trophyShelf(x + 2, 8), plantShelf: plantShelf(x, 6) }[kind];
+}
+
+function cabinetSvg(kind, x, y) {
+  if (kind === "safe") return box(x, y, 14, 14, "#5d6470") + box(x + 2, y + 2, 10, 10, "#76828c") + box(x + 5, y + 5, 4, 4, "#3d424e") + rect(x + 10, y + 6, 1, 3, "#f5c242");
+  if (kind === "minifridge") return box(x, y, 12, 14, "#f4f4f1") + rect(x + 1, y + 5, 10, 1, "#aab2bb") + rect(x + 9, y + 2, 1, 2, PX.metalDark) + rect(x + 9, y + 7, 1, 4, PX.metalDark) + rect(x + 2, y + 2, 3, 1, "#5cc28f", "amb-blink slow");
+  return cabinet(x, y);
 }
 
 // ---------- room layout ----------
@@ -1343,42 +1799,83 @@ function floorSvg(kind, W, H) {
   return s;
 }
 
+// Everything that can hang on the back wall: its width, how to draw it, and what the dashboard says about it.
 const WALL_ITEMS = {
-  whiteboard: { w: 34, draw: (x) => whiteboard(x, 5) },
-  posters: { w: 30, draw: (x) => posters(x, 6) },
-  screen: { w: 40, draw: (x) => wallScreen(x, 4) },
-  map: { w: 32, draw: (x) => worldMap(x, 5) },
-  banner: { w: 38, draw: (x) => banner(x, 4) },
-  neon: { w: 30, draw: (x) => neonSign(x, 8) },
-  plantShelf: { w: 32, draw: (x) => plantShelf(x, 6) },
-  clock: { w: 9, draw: (x) => clock(x, 8) },
-  kanban: { w: 36, draw: (x) => kanbanBoard(x, 5) },
-  frames: { w: 34, draw: (x) => pictureFrames(x, 5) },
-  calendar: { w: 16, draw: (x) => wallCalendar(x, 6) },
-  aircon: { w: 28, draw: (x) => airConditioner(x, 5) },
+  whiteboard: { w: 34, name: "Whiteboard", about: "Yesterday's architecture sketch, never wiped.", draw: (x) => whiteboard(x, 5) },
+  posters: { w: 30, name: "Posters", about: "Two posters somebody brought from home.", draw: (x) => posters(x, 6) },
+  screen: { w: 40, name: "Status screen", about: "Build status and charts, updated all day.", draw: (x) => wallScreen(x, 4) },
+  map: { w: 32, name: "World map", about: "Where the customers are.", draw: (x) => worldMap(x, 5) },
+  banner: { w: 38, name: "Party flags", about: "Left over from the last release party.", draw: (x) => banner(x, 4) },
+  neon: { w: 30, name: "Neon sign", about: "Flickers a little. Nobody minds.", draw: (x) => neonSign(x, 8) },
+  plantShelf: { w: 32, name: "Plant shelf", about: "Two plants and a cactus that needs no care.", draw: (x) => plantShelf(x, 6) },
+  clock: { w: 9, name: "Wall clock", about: "Ticks along with the day.", draw: (x) => clock(x, 8) },
+  kanban: { w: 36, name: "Kanban board", about: "Sticky notes for what the team is doing.", draw: (x) => kanbanBoard(x, 5) },
+  frames: { w: 34, name: "Picture frames", about: "Team photos and a holiday picture.", draw: (x) => pictureFrames(x, 5) },
+  calendar: { w: 16, name: "Calendar", about: "The release date is circled in red.", draw: (x) => wallCalendar(x, 6) },
+  aircon: { w: 28, name: "Air conditioner", about: "Keeps the room cool.", draw: (x) => airConditioner(x, 5) },
+  artSea: { w: 22, name: "Painting: Sailing boat", about: "A calm sea for busy days.", draw: (x) => painting(x, 5, 22, 17, "sea", "#b4793a") },
+  artMountain: { w: 22, name: "Painting: Mountains", about: "Snow on the peaks.", draw: (x) => painting(x, 5, 22, 17, "mountain", "#e9eef2") },
+  artAbstract: { w: 20, name: "Painting: Abstract", about: "Everybody sees something else in it.", draw: (x) => painting(x, 6, 20, 16, "abstract", "#2a2433") },
+  artCat: { w: 18, name: "Portrait of a cat", about: "The founder of the company, they say.", draw: (x) => painting(x, 5, 18, 17, "cat", "#d9a441") },
+  artSunset: { w: 26, name: "Painting: Sunset", about: "Bought at a flea market.", draw: (x) => painting(x, 6, 26, 15, "sunset", "#8a5a2b") },
+  artFlower: { w: 16, name: "Painting: Flower", about: "A single flower in a pot.", draw: (x) => painting(x, 5, 16, 17, "flower", "#e9eef2") },
+  artCity: { w: 24, name: "Painting: City at night", about: "One window is always lit.", draw: (x) => painting(x, 6, 24, 16, "city", "#3d424e") },
+  artSpace: { w: 20, name: "Painting: Planet", about: "A ringed planet and a few stars.", draw: (x) => painting(x, 5, 20, 17, "space", "#d9a441") },
+  dartboard: { w: 14, name: "Dartboard", about: "For decisions nobody wants to make.", draw: (x) => dartboard(x, 7) },
+  corkboard: { w: 30, name: "Pin board", about: "Notes, photos and a lunch menu.", draw: (x) => corkboard(x, 5) },
+  roadmap: { w: 38, name: "Roadmap", about: "Milestones: two done, one in progress.", draw: (x) => roadmap(x, 5) },
+  lineChart: { w: 28, name: "Growth chart", about: "Up and to the right.", draw: (x) => lineChart(x, 5) },
+  stringLights: { w: 40, name: "String lights", about: "Cosy light all year round.", draw: (x) => stringLights(x, 4) },
+  exitSign: { w: 16, name: "Exit sign", about: "This way out.", draw: (x) => exitSign(x, 9) },
+  guitar: { w: 10, name: "Guitar", about: "Hangs here until Friday afternoon.", draw: (x) => wallGuitar(x, 5) },
+  mirror: { w: 14, name: "Mirror", about: "A quick look before the meeting.", draw: (x) => wallMirror(x, 5) },
+  cuckoo: { w: 12, name: "Cuckoo clock", about: "The pendulum never stops.", draw: (x) => cuckooClock(x, 5) },
+  bookLedge: { w: 30, name: "Book ledge", about: "Technical books and a small plant.", draw: (x) => bookLedge(x, 5) },
+  hangingPlants: { w: 26, name: "Hanging plants", about: "Vines growing towards the windows.", draw: (x) => hangingPlants(x, 5) },
+  wallTv: { w: 34, name: "News TV", about: "The news runs without sound.", draw: (x) => wallTv(x, 5) },
+  certificates: { w: 26, name: "Certificates", about: "Awards the team is proud of.", draw: (x) => certificates(x, 4) },
+  skateboard: { w: 26, name: "Skateboard", about: "Somebody rides it to work.", draw: (x) => skateboard(x, 7) },
+  worldClocks: { w: 34, name: "World clocks", about: "Three time zones at a glance.", draw: (x) => worldClocks(x, 6) },
+  quotePoster: { w: 18, name: "Motto poster", about: "Ship it.", draw: (x) => quotePoster(x, 5) },
+  thermostat: { w: 8, name: "Thermostat", about: "Always one degree too warm for somebody.", draw: (x) => smallBoxes(x, 6, "thermostat") },
+  fireExt: { w: 8, name: "Fire extinguisher", about: "Checked every year.", draw: (x) => smallBoxes(x, 6, "fireExt") },
+  firstAid: { w: 12, name: "First aid kit", about: "Plasters for paper cuts.", draw: (x) => smallBoxes(x, 5, "firstAid") },
+  speaker: { w: 10, name: "Wall speaker", about: "Quiet background music.", draw: (x) => smallBoxes(x, 5, "speaker") },
 };
 
 // Things along the bottom wall. Items with an emote are places people visit on a break.
 // Things along the bottom wall. Items with emotes are places people visit on a break;
 // "use" names the class the room gets while somebody is there, so the item reacts.
+// Things along the bottom wall. Items with emotes are places people visit on a break ("does" says what
+// happens there). The item's own class (item-<name>) lets it react while somebody is there.
 const FLOOR_ITEMS = {
-  coffee: { w: 18, emotes: ["⏳", "☕"], mug: true, draw: (x, H) => coffeeMachine(x, H - 16) },
-  cooler: { w: 14, emotes: ["💧"], draw: (x, H) => waterCooler(x, H - 22) },
-  vending: { w: 18, emotes: ["🪙", "🥤"], draw: (x, H) => vendingMachine(x, H - 20) },
-  aquarium: { w: 28, emotes: ["🐟", "🫧"], draw: (x, H) => aquarium(x, H - 20) },
-  arcade: { w: 18, emotes: ["🎮", "🕹️", "⭐"], play: "arcade", draw: (x, H) => arcade(x, H - 20) },
-  printer: { w: 20, emotes: ["🖨️", "📄"], draw: (x, H) => printer(x, H - 20) },
-  beanbags: { w: 26, seats: [-2, 11], emotes: ["😌", "📱"], draw: (x, H) => beanbags(x, H - 13) },
-  lamp: { w: 11, draw: (x, H) => floorLamp(x, H - 18) },
-  bigPlant: { w: 10, emotes: ["💧", "🌿"], draw: (x, H) => plant(x, H - 18, true) },
-  servers: { w: 16, emotes: ["🔧", "✅"], draw: (x, H) => serverRack(x, H - 20) },
-  cat: { w: 20, emotes: ["🐱", "💕"], draw: (x, H, style) => officeCat(x + 1, H - 16, style.catColor) },
-  bins: { w: 22, draw: (x, H) => recyclingBins(x, H - 19) },
-  coats: { w: 12, draw: (x, H) => coatRack(x, H - 21) },
+  coffee: { w: 18, name: "Coffee machine", about: "The most visited place in the room.", does: "People wait for a coffee and take the mug back to the desk.", emotes: ["⏳", "☕"], mug: true, draw: (x, H) => coffeeMachine(x, H - 16) },
+  cooler: { w: 14, name: "Water cooler", about: "Where the office news travels.", does: "People stop for a glass of water.", emotes: ["💧"], draw: (x, H) => waterCooler(x, H - 22) },
+  vending: { w: 18, name: "Vending machine", about: "Takes coins, sometimes gives drinks.", does: "People buy a drink.", emotes: ["🪙", "🥤"], draw: (x, H) => vendingMachine(x, H - 20) },
+  aquarium: { w: 28, name: "Aquarium", about: "Two fish that have seen every release.", does: "People feed the fish and watch them.", emotes: ["🐟", "🫧"], draw: (x, H) => aquarium(x, H - 20) },
+  arcade: { w: 18, name: "Arcade machine", about: "High score: held by the PM.", does: "People play a round.", emotes: ["🎮", "🕹️", "⭐"], play: "arcade", draw: (x, H) => arcade(x, H - 20) },
+  printer: { w: 20, name: "Printer", about: "Works on the second try.", does: "People pick up their printouts.", emotes: ["🖨️", "📄"], draw: (x, H) => printer(x, H - 20) },
+  beanbags: { w: 26, name: "Beanbags", about: "Hard to get out of.", does: "Up to two people sink in and rest.", seats: [-2, 11], emotes: ["😌", "📱"], draw: (x, H) => beanbags(x, H - 13) },
+  lamp: { w: 11, name: "Floor lamp", about: "Warm light for late evenings.", draw: (x, H) => floorLamp(x, H - 18) },
+  bigPlant: { w: 10, name: "Big plant", about: "Grows a new leaf every sprint.", does: "People water it.", emotes: ["💧", "🌿"], draw: (x, H) => plant(x, H - 18, true) },
+  servers: { w: 16, name: "Server rack", about: "Hums quietly. Please do not unplug.", does: "People check the lights and fix things.", emotes: ["🔧", "✅"], draw: (x, H) => serverRack(x, H - 20) },
+  cat: { w: 20, pet: "cat", name: "Office cat", about: "Sleeps most of the day and takes a walk now and then.", does: "People come to pet it; it wakes up and purrs.", emotes: ["🐱", "💕"], draw: (x, H, v) => officeCat(x + 1, H - 16, CAT_COLORS[v % 4]) },
+  dog: { w: 22, pet: "dog", name: "Office dog", about: "Guards the basket and greets everybody.", does: "People come to pet it; it wags its tail.", emotes: ["🐶", "💕"], draw: (x, H, v) => officeDog(x + 3, H - 16, DOG_COLORS[v % 4]) },
+  bird: { w: 14, name: "Bird cage", about: "Sings when the build is green.", does: "People whistle a tune with the bird.", emotes: ["🐦", "🎶"], draw: (x, H) => birdCage(x, H - 21) },
+  treadmill: { w: 22, name: "Treadmill", about: "For walking meetings without leaving.", does: "People walk a few minutes on it.", emotes: ["🏃", "💦"], play: "treadmill", stand: -4, draw: (x, H) => treadmill(x, H - 20) },
+  speaker: { w: 12, name: "Speaker", about: "Friday playlist, all week.", does: "People dance for a moment.", emotes: ["🎵", "🕺"], play: "dance", draw: (x, H) => floorSpeaker(x, H - 20) },
+  snacks: { w: 18, name: "Snack shelf", about: "Refilled on Mondays, empty by Wednesday.", does: "People grab a snack.", emotes: ["🍫", "😋"], draw: (x, H) => snackShelf(x, H - 20) },
+  bike: { w: 24, name: "Bike", about: "Somebody cycles to work in any weather.", does: "People check the tyres.", emotes: ["🚲"], draw: (x, H) => bikeStand(x, H - 19) },
+  easel: { w: 18, name: "Sketch board", about: "Ideas that did not fit on the wall.", does: "People sketch an idea.", emotes: ["✏️", "💡"], draw: (x, H) => sketchEasel(x, H - 21) },
+  foosball: { w: 30, name: "Table football", about: "Blue against red since day one.", does: "People play a quick match.", emotes: ["⚽", "🥅"], play: "arcade", draw: (x, H) => foosball(x, H - 21) },
+  massage: { w: 18, name: "Massage chair", about: "Ten minutes fix any deadline.", does: "One person sits down and relaxes.", seats: [1], emotes: ["😌", "💤"], draw: (x, H) => massageChair(x, H - 19) },
+  telescope: { w: 15, name: "Telescope", about: "Points at the office across the street.", does: "People take a look through it.", emotes: ["🔭", "✨"], draw: (x, H) => telescope(x, H - 20) },
+  bins: { w: 22, name: "Recycling bins", about: "Paper left, plastic right.", draw: (x, H) => recyclingBins(x, H - 19) },
+  coats: { w: 12, name: "Coat rack", about: "Two coats and a forgotten umbrella.", draw: (x, H) => coatRack(x, H - 21) },
 };
 
-function roomSvg(agents, seed = 0, { sky = skyPhase() } = {}) {
-  const style = roomStyle(seed);
+function roomSvg(agents, seed = 0, { sky = skyPhase(), items = {} } = {}) {
+  const style = roomStyle(seed, items);
   Object.assign(PX, BASE_PX, style.palette.colors);
   try {
     const layout = roomLayout(agents, style);
@@ -1395,36 +1892,42 @@ function roomSvg(agents, seed = 0, { sky = skyPhase() } = {}) {
       s += style.roundWindows ? roundWindow(wx, 7, windowSky) : windowSvg(wx, 6, 34, 17, windowSky);
       wx += style.roundWindows ? 22 : 42;
     }
-    for (const name of style.wallDecor) {
+    // layout.items lists what can be clicked: the slot and its rectangle in room pixels.
+    layout.items = [];
+    style.wallDecor.forEach((name, i) => {
       const item = WALL_ITEMS[name];
-      if (wx + item.w > teamX + 186) continue;
-      s += item.draw(wx);
+      s += group(`item wall-${name}`, item.draw(wx));
+      layout.items.push({ slot: `wall.${i}`, name: item.name, x: wx - 1, y: 2, w: item.w + 2, h: 25 });
       wx += item.w + 8;
-    }
-    s += { bookshelf: bookshelf(pmX + 28, 6), trophies: trophyShelf(pmX + 28, 8), plantShelf: plantShelf(pmX + 26, 6) }[style.pmShelf];
-    s += cabinet(pmX + 6, 15) + plant(pmX + 19, 16);
+    });
+    s += shelfSvg(style.shelf, pmX + 26) + cabinetSvg(style.cabinet, pmX + 6, 15) + plant(pmX + 20, 16);
+    layout.items.push({ slot: "shelf", name: SHELF_INFO[style.shelf].name, x: pmX + 26, y: 3, w: 34, h: 26 });
+    layout.items.push({ slot: "cabinet", name: CABINET_INFO[style.cabinet].name, x: pmX + 5, y: 14, w: 15, h: 16 });
 
     // Lounge under the manager's desk, with the places where people sit, play or gather.
     const loungeY = Math.max(102, H - 66);
     s += group(`item lounge-${style.lounge}`, lounge(style.lounge, pmX, loungeY));
     (LOUNGE_SPOTS[style.lounge] || []).forEach(({ dx, dy, ...how }) => {
-      layout.spots.push({ ...how, x: pmX + dx, y: loungeY + dy, zone: "lounge" });
+      layout.spots.push({ ...how, x: pmX + dx, y: loungeY + dy, zone: "lounge", slot: "lounge" });
     });
     if (style.lounge === "pingpong") layout.pingpong = { x: pmX + 14, y: loungeY + 14, w: 36, h: 22 };
+    layout.items.push({ slot: "lounge", name: LOUNGE_INFO[style.lounge].name, x: pmX + 2, y: loungeY - 6, w: 60, h: H - loungeY - 2 });
 
     // Floor extras along the bottom wall of the team area (the door is in the middle).
-    let ex = teamX + 2;
-    for (const name of style.extras) {
+    placeFloor(style.extras, teamX).forEach((ex, i) => {
+      if (ex === null) return;
+      const name = style.extras[i];
+      const slot = `floor.${i}`;
       const item = FLOOR_ITEMS[name];
-      if (ex + item.w > 112 && ex < 148) ex = 150;
-      if (ex + item.w > teamX + 186) continue;
-      s += group(`item item-${name}`, item.draw(ex, H, style));
-      const how = { zone: "floor", emotes: item.emotes, mug: item.mug, play: item.play, use: name };
+      const v = style.variant(slot);
+      s += group(`item item-${name}`, item.draw(ex, H, v));
+      const how = { zone: "floor", emotes: item.emotes, mug: item.mug, play: item.play, use: name, slot };
       if (item.seats) item.seats.forEach((dx) => layout.spots.push({ ...how, x: ex + dx, y: H - 24, sit: true, show: 15 }));
-      else if (item.emotes) layout.spots.push({ ...how, x: ex + Math.floor(item.w / 2) - 7, y: H - 46 });
-      if (name === "cat") layout.cat = { x: ex + 1, y: H - 16, color: style.catColor };
-      ex += item.w + 6;
-    }
+      else if (item.emotes) layout.spots.push({ ...how, x: ex + Math.floor(item.w / 2) - 7, y: H - 46 + (item.stand || 0) });
+      if (item.pet) layout.pet = { kind: item.pet, x: ex + 1, y: H - 16, v, slot, use: name };
+      layout.items.push({ slot, name: item.name, x: ex - 1, y: H - 33, w: item.w + 2, h: 29 });
+    });
+    layout.vacuum = { kind: style.vacuum, v: style.variant("vacuum"), name: VACUUM_INFO[style.vacuum].name };
     // Stepping out through the door.
     layout.door = { x: 124, y: H - 24 };
     layout.spots.push({ ...layout.door, zone: "door" });

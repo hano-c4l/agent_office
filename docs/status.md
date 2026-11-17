@@ -1,7 +1,8 @@
 # Agent Office: project status
 
-Last updated: 2026-11-18. Production (`main`) contains PR #1 to #5. `preview` also contains the system review and
-room polish (PR #6) and the second room update described below (PR #7), neither released to `main` yet.
+Last updated: 2026-11-18. Production (`main`) and `preview` are in line and contain PR #1 to #8: the system review
+and room polish (PR #6), the second room update (PR #7) and the third (PR #8: swappable room items, more desks and
+decoration).
 
 ## What works
 
@@ -15,15 +16,16 @@ room polish (PR #6) and the second room update described below (PR #7), neither 
 | Agents and skills | Written by the PM in the current Claude Code format (`templates/roles.json` is a reference); staged in `.office/team/` and installed by the server; automatic session reload after new agents |
 | Office files update | A department with older hooks, `/office` skill or CLAUDE.md section shows **Update office files**; the update is committed on the current branch |
 | HR | Edit profiles, dismiss, assistants (they keep their name and look), **+ Hire staff** in Manual or Auto (PM designs the role, hire proposal to approve) |
-| Looks | Random names (Vietnamese and international), genders and pixel looks (14 or 15 hair styles per gender, 16 outfits, accessories, three builds, dyed hair tips, headwear, eyewear); rooms generated from a seed: 6 desk layouts, 7 lounges, 12 wall decorations, 13 floor items, 5 chair models, 8 palettes; no rugs marking the areas |
-| Desks | Per person: 7 shapes, 4 widths, 3 materials, 6 computer setups, 8 drinks, 10 personal items |
-| PM | Navy blazer, gold tie and pin, headset, leather chair, panelled desk with name plate and two screens, star on the name tag |
+| Looks | Random names (Vietnamese and international), genders and pixel looks (14 or 15 hair styles per gender, 16 outfits, accessories, three builds, dyed hair tips, headwear, eyewear); rooms generated from a seed: 6 desk layouts, 10 lounges, 40 wall decorations (up to five per room), 23 floor items, 3 manager shelves, 3 cabinets, 3 cleaning robots, 5 chair models, 8 palettes; no rugs marking the areas |
+| Room items | Every decoration can be clicked: side panel with what it is, what staff do there and who is there now; 🎲 swaps it for another item that fits; the choice is saved in the department (`roomItems`) and cleared by 🎲 Room |
+| Desks | Per person: 14 shapes, 4 widths, 3 materials, 6 computer setups, 8 drinks, 10 personal items; the staff panel lists them and a desk button rolls a new desk (`deskSeed` in `.office/staff.json`) |
+| PM | Navy blazer, gold tie and pin, headset, 6 executive desks and 4 executive chairs, name plate and two screens, star on the name tag |
 | Room scenes | One scene per status with several variants per person; short flashes for the tool in use, a failed command and a finished task; tasks and reports flying between desks; confetti on delivery; moving furniture; windows follow the time of day |
-| Breaks | Idle staff walk to a place and use it: sit (sofa, tables, stools, bench, armchair, beanbags), play (ping-pong, arcade), coffee, cat, door; group breaks of two to four people in the lounge; robot vacuum, wandering cat and a courier |
+| Breaks | Idle staff walk to a place and use it: sit (sofa, tables, stools, bench, armchair, beanbags, nap pods, massage chair), play (ping-pong, arcade, table football, gaming corner, band, treadmill), coffee, pets, door; group breaks of two to four people in the lounge; cleaning robot, wandering cat or dog and a courier |
 | Customer channel | Client desk, Messages and Activity tabs, "Needs your reply" markers, chat runs can be taken over from the dashboard |
 | Runner | Claude CLI in print mode, allowed and blocked tools in `office/runner.json`, up to two PM runs in parallel, runs stop with the server |
 | Local API safety | Bound to 127.0.0.1; refuses requests from other sites and rebound host names; writes need JSON |
-| Tests | `npm test`: 14 server tests (request guard, agent files, staff store, scheduler, new workspace, office update, release, migration) |
+| Tests | `npm test`: 15 server tests (request guard, agent files, staff store and desks, room items, scheduler, new workspace, office update, release, migration) |
 
 ## Tested with real runs
 
@@ -63,6 +65,18 @@ department; it is covered by an automated test in a temporary repository.
 Not checked in the browser for that update: live mode with a real run, narrow screens, and the less frequent scenes
 (the cat's walk, kitchen, library, garden, round table, beanbags and arcade), which share the code of the ones seen.
 
+## Checked for the room items update of 2026-11-18 (no PM runs)
+
+| Check | Result |
+|---|---|
+| `npm test` | 15 of 15 pass |
+| Room generator | 300 seeds drawn; every one of the 40 wall items, 23 floor items, 10 lounges, 14 desk shapes and 6 executive desks appeared; 9514 single swaps tried, each one applied without pushing another item out of the room |
+| Demo mode in the browser | Clicked the lounge, a painting, a floor item, the shelf, the cabinet and the moving cleaning robot: each opened its panel, and 🎲 swapped it (gaming corner to sofa, flower painting to exit sign, printer to office cat, trophy shelf to bookshelf, filing cabinet to safe, drone to robot vacuum); the desk button gave a person another desk; no console errors |
+| Live mode in the browser | A real department loads with 12 clickable items and opens their panel |
+
+Not checked in the browser for that update: swapping an item in live mode (the server route is covered by a test),
+narrow screens, and the scenes at the new places (band, nap pods, treadmill, massage chair, the dog's walk).
+
 ## Fixed in that review
 
 - `templates/workspace/CLAUDE.md` was not in git (the `workspace/` ignore rule also matched `templates/workspace/`),
@@ -77,7 +91,13 @@ Not checked in the browser for that update: live mode with a real run, narrow sc
 
 - **Rooms changed their look.** A room is generated from its seed, and the generator has more choices now, so every
   existing room looks different after each of these updates. **🎲 Room** picks another one.
-- **Desks follow the person and the room seed**: a new room look also gives everybody another desk and gear.
+- **Desks follow the person and the room seed**: a new room look also gives everybody another desk and gear; the
+  desk button only changes one person's desk within the current room.
+- **Swapped items depend on the room**: they are kept per place ("the third picture", "the lounge"), so a wall item
+  that no longer fits after a code update falls back to the room's own choice. Items can be swapped, not added or
+  removed, and the number of pictures depends on how much wall the windows leave.
+- **Clicking near people**: the click areas of decoration lie under the staff, so a picture right behind somebody's
+  head opens that person instead.
 - **Walking through furniture**: people on a break walk along simple paths (aisle, corridor, target) and can cross
   the edge of a desk or a name tag on the way.
 - **Scenes are decoration.** Break walks, flying notes and confetti play only in the open room, not on the company
