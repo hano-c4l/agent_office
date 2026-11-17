@@ -1,7 +1,7 @@
 # Agent Office: project status
 
-Last updated: 2026-11-17. Production (`main`) contains PR #1 to #5. `preview` also contains the system review and
-room polish described below (`feature_review_ui_polish`), not released to `main` yet.
+Last updated: 2026-11-18. Production (`main`) contains PR #1 to #5. `preview` also contains the system review and
+room polish (PR #6) and the second room update described below (PR #7), neither released to `main` yet.
 
 ## What works
 
@@ -15,8 +15,11 @@ room polish described below (`feature_review_ui_polish`), not released to `main`
 | Agents and skills | Written by the PM in the current Claude Code format (`templates/roles.json` is a reference); staged in `.office/team/` and installed by the server; automatic session reload after new agents |
 | Office files update | A department with older hooks, `/office` skill or CLAUDE.md section shows **Update office files**; the update is committed on the current branch |
 | HR | Edit profiles, dismiss, assistants (they keep their name and look), **+ Hire staff** in Manual or Auto (PM designs the role, hire proposal to approve) |
-| Looks | Random names (Vietnamese and international), genders and pixel looks (11 hair styles per gender, 11 outfits, headwear, eyewear); rooms generated from a seed: 6 desk layouts, 7 lounges, 12 wall decorations, 13 floor items, 8 palettes |
-| Room scenes | One scene per status (working, thinking, talking, needs you, idle habits, queued, error, delivered, joining); break walks; tasks and reports flying between desks; confetti on delivery; moving furniture; windows follow the time of day |
+| Looks | Random names (Vietnamese and international), genders and pixel looks (14 or 15 hair styles per gender, 16 outfits, accessories, three builds, dyed hair tips, headwear, eyewear); rooms generated from a seed: 6 desk layouts, 7 lounges, 12 wall decorations, 13 floor items, 5 chair models, 8 palettes; no rugs marking the areas |
+| Desks | Per person: 7 shapes, 4 widths, 3 materials, 6 computer setups, 8 drinks, 10 personal items |
+| PM | Navy blazer, gold tie and pin, headset, leather chair, panelled desk with name plate and two screens, star on the name tag |
+| Room scenes | One scene per status with several variants per person; short flashes for the tool in use, a failed command and a finished task; tasks and reports flying between desks; confetti on delivery; moving furniture; windows follow the time of day |
+| Breaks | Idle staff walk to a place and use it: sit (sofa, tables, stools, bench, armchair, beanbags), play (ping-pong, arcade), coffee, cat, door; group breaks of two to four people in the lounge; robot vacuum, wandering cat and a courier |
 | Customer channel | Client desk, Messages and Activity tabs, "Needs your reply" markers, chat runs can be taken over from the dashboard |
 | Runner | Claude CLI in print mode, allowed and blocked tools in `office/runner.json`, up to two PM runs in parallel, runs stop with the server |
 | Local API safety | Bound to 127.0.0.1; refuses requests from other sites and rebound host names; writes need JSON |
@@ -49,6 +52,17 @@ All on Windows 11 with the Claude CLI logged in to a Pro account. Costs are the 
 Not done in that review: no PM run was started (they cost money), and **Update office files** was not pressed on a real
 department; it is covered by an automated test in a temporary repository.
 
+## Checked for the room update of 2026-11-18 (no PM runs)
+
+| Check | Result |
+|---|---|
+| `npm test` | 14 of 14 pass |
+| Room generator | 400 seeds drawn with 0, 1, 4, 9 and 13 staff, cycling through every hair style, outfit, headwear, accessory and build, without an error |
+| Demo mode in the browser | Seen working: varied desks and gear, the PM's look, sitting on the sofa with the TV on, a ping-pong match with the ball, two people at the meeting table, the robot vacuum, the courier, tool flashes; no console errors |
+
+Not checked in the browser for that update: live mode with a real run, narrow screens, and the less frequent scenes
+(the cat's walk, kitchen, library, garden, round table, beanbags and arcade), which share the code of the ones seen.
+
 ## Fixed in that review
 
 - `templates/workspace/CLAUDE.md` was not in git (the `workspace/` ignore rule also matched `templates/workspace/`),
@@ -62,7 +76,10 @@ department; it is covered by an automated test in a temporary repository.
 ## Known limits
 
 - **Rooms changed their look.** A room is generated from its seed, and the generator has more choices now, so every
-  existing room looks different after this update. **🎲 Room** picks another one.
+  existing room looks different after each of these updates. **🎲 Room** picks another one.
+- **Desks follow the person and the room seed**: a new room look also gives everybody another desk and gear.
+- **Walking through furniture**: people on a break walk along simple paths (aisle, corridor, target) and can cross
+  the edge of a desk or a name tag on the way.
 - **Scenes are decoration.** Break walks, flying notes and confetti play only in the open room, not on the company
   floor, and are not shown with reduced motion. A person on a break still counts as idle.
 - **Office files** are still copied, not linked: after an Agent Office update each department needs one click on
@@ -82,6 +99,6 @@ department; it is covered by an automated test in a temporary repository.
 
 1. Git account settings and creating the remote repository from the dashboard.
 2. A smoke test for the dashboard (load demo mode, open every room, no console errors) and tests for the department API.
-3. Real conversations in the room: the PM walks to a desk or calls a meeting at the lounge table when several people get tasks.
+3. Tie the lounge to real work: the PM calls a meeting at the lounge table when several people get tasks at once.
 4. Break walks and status scenes on the company floor cards, lighter than in the open room.
 5. Run the test suite on macOS and Linux, and exercise two real PM runs in parallel.

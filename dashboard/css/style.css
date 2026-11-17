@@ -143,7 +143,9 @@ body:not(.demo) .demo-only { display: none !important; }
    Each state is a small scene: what the person does, the icon over the head and what happens on the desk. */
 .ws .body { animation: breathe 2.4s steps(1) infinite; }
 .ws .lids { opacity: 0; animation: blink 4.2s steps(1) infinite; }
-.ws .arm-up, .ws .icon, .ws .steam, .ws .talk-mouth, .ws .phone, .ws .sparks, .ws .movebox, .ws .code { display: none; }
+.ws .arm-up, .ws .icon, .ws .steam, .ws .talk-mouth, .ws .phone, .ws .sparks, .ws .movebox,
+.ws .mood, .ws .readdoc, .ws .flame, .ws .smoke, .ws .beacon, .ws .trophy, .ws .desklamp { display: none; }
+.ws.back .code { display: none; }
 .ws .glow { opacity: 0; }
 @keyframes breathe { 50% { transform: translateY(1px); } }
 @keyframes blink { 0%, 95% { opacity: 0; } 96%, 100% { opacity: 1; } }
@@ -153,7 +155,13 @@ body:not(.demo) .demo-only { display: none !important; }
 .st-working .hands rect:last-child { animation: tap .26s steps(1) .13s infinite; }
 .st-working .glow { animation: glow 1.1s steps(2) infinite; }
 .st-working .body { animation: breathe .9s steps(1) infinite; }
-.st-working .sparks, .st-working .code { display: inline; }
+.st-working .sparks, .st-working.back .code, .st-working .desklamp { display: inline; }
+.st-working .desklamp { opacity: .55; }
+/* Busy habits: some people show what they write, some are on fire. */
+.st-working[data-idle="1"] .icon-code, .st-working[data-idle="4"] .icon-code { display: inline; opacity: 0; animation: idea 5s steps(1) infinite; }
+.st-working[data-idle="2"] .flame, .st-working[data-idle="5"] .flame { display: inline; animation: flame .4s steps(1) infinite; }
+.st-working[data-idle="2"] .sparks, .st-working[data-idle="5"] .sparks { display: none; }
+@keyframes flame { 50% { transform: translateY(-1px); opacity: .8; } }
 .st-working .sparks rect { animation: spark 1.2s steps(4) infinite; }
 .st-working .sparks .k1 { animation-delay: .4s; }
 .st-working .sparks .k2 { animation-delay: .8s; }
@@ -170,6 +178,13 @@ body:not(.demo) .demo-only { display: none !important; }
 .st-thinking .icon-think .d3 { animation: dot 1.2s steps(1) .6s infinite; }
 .st-thinking .icon-bulb { display: inline; opacity: 0; animation: idea 7s steps(1) infinite; }
 .st-thinking .body { animation: sway 2.8s steps(1) infinite; }
+/* Thinking habits: question marks instead of dots, or reading a document held up. */
+.st-thinking[data-idle="1"] .icon-think, .st-thinking[data-idle="4"] .icon-think,
+.st-thinking[data-idle="1"] .icon-bulb, .st-thinking[data-idle="4"] .icon-bulb { display: none; }
+.st-thinking[data-idle="1"] .icon-ask, .st-thinking[data-idle="4"] .icon-ask { display: inline; }
+.st-thinking .icon-ask .z1 { animation: zfloat 2.2s steps(4) infinite; }
+.st-thinking .icon-ask .z2 { animation: zfloat 2.2s steps(4) 1.1s infinite; }
+.st-thinking[data-idle="2"] .readdoc, .st-thinking[data-idle="5"] .readdoc { display: inline; animation: breathe 1.8s steps(1) infinite; }
 @keyframes dot { 50% { opacity: .15; } }
 @keyframes idea { 0%, 78% { opacity: 0; transform: none; } 80% { opacity: 1; transform: translateY(-1px); } 84%, 96% { opacity: 1; transform: none; } 100% { opacity: 0; } }
 @keyframes sway { 0%, 100% { transform: none; } 25% { transform: translateX(-1px); } 75% { transform: translateX(1px); } }
@@ -178,6 +193,9 @@ body:not(.demo) .demo-only { display: none !important; }
 .st-talking .icon-talk { display: inline; animation: hop .6s steps(1) infinite; }
 .st-talking .body { animation: nod .5s steps(1) infinite; }
 .st-talking .talk-mouth { display: inline; animation: flap .34s steps(1) infinite; }
+.st-talking .icon-wave { display: inline; }
+.st-talking .icon-wave .z1 { animation: flap .5s steps(1) infinite; }
+.st-talking .icon-wave .z2 { animation: flap .5s steps(1) -.25s infinite; }
 @keyframes nod { 50% { transform: translateY(1px); } }
 @keyframes hop { 50% { transform: translateY(-1px); } }
 @keyframes flap { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
@@ -185,6 +203,10 @@ body:not(.demo) .demo-only { display: none !important; }
 /* Needs you: a raised, waving hand and a bouncing alert. */
 .st-waiting .arm-up { display: inline; animation: wave .5s steps(1) infinite; }
 .st-waiting .icon-alert { display: inline; animation: bounce .7s steps(1) infinite; }
+.st-waiting .mood-oh, .st-waiting .beacon { display: inline; }
+.st-waiting .beacon rect:last-child { animation: amb-blink .5s steps(1) infinite; }
+.tag-waiting { animation: tag-call 1s steps(2) infinite; }
+@keyframes tag-call { 50% { background: #c2405a; } }
 @keyframes wave { 50% { transform: translateX(1px); } }
 @keyframes bounce { 50% { transform: translateY(-2px); } }
 
@@ -202,6 +224,12 @@ body:not(.demo) .demo-only { display: none !important; }
 .st-idle[data-idle="2"] .body { animation: sway 1.2s steps(1) infinite; }
 .st-idle[data-idle="3"] .phone { display: inline; }
 .st-idle[data-idle="3"] .phone rect:last-child { animation: amb-blink 2.3s steps(1) infinite; }
+.st-idle[data-idle="0"] .mug { animation: sip 7s steps(1) infinite; }
+.st-idle[data-idle="4"] .arm-up { display: inline; opacity: 0; animation: stretch 8s steps(1) infinite; }
+.st-idle[data-idle="4"] .mood-oh { display: inline; opacity: 0; animation: stretch 8s steps(1) infinite; }
+.st-idle[data-idle="5"] .icon-dream { display: inline; animation: hop 2.4s steps(1) infinite; }
+@keyframes sip { 0%, 78%, 100% { transform: none; } 80%, 96% { transform: translate(var(--sip-x, -12px), -7px); } }
+@keyframes stretch { 0%, 70%, 100% { opacity: 0; } 72%, 96% { opacity: 1; } }
 @keyframes steam { 0% { transform: translateY(0); opacity: .9; } 50% { transform: translateY(-2px); opacity: .5; } }
 @keyframes zfloat { 0% { transform: translateY(2px); opacity: 0; } 30% { opacity: 1; } 100% { transform: translate(2px, -4px); opacity: 0; } }
 @keyframes doze { 0%, 100% { transform: translateY(1px); } 50% { transform: translateY(2px); } }
@@ -216,6 +244,10 @@ body:not(.demo) .demo-only { display: none !important; }
 .st-error .icon-sweat { animation: drip 1.6s steps(4) infinite; }
 .st-error .body { animation: shake 1.8s steps(1) infinite; }
 .st-error .glow { fill: #ff5a5a; animation: glow .5s steps(2) infinite; }
+.st-error .mood-worry, .st-error .smoke { display: inline; }
+.st-error .smoke rect { animation: spark 1.8s steps(5) infinite; }
+.st-error .smoke .k1 { animation-delay: .6s; }
+.st-error .smoke .k2 { animation-delay: 1.2s; }
 @keyframes drip { 0% { transform: none; opacity: 1; } 100% { transform: translateY(5px); opacity: 0; } }
 @keyframes shake { 0%, 60%, 100% { transform: none; } 70%, 90% { transform: translateX(-1px); } 80% { transform: translateX(1px); } }
 
@@ -223,16 +255,27 @@ body:not(.demo) .demo-only { display: none !important; }
 .st-done .icon-done { display: inline; animation: hop 1.4s steps(1) infinite; }
 .st-done .arm-up { display: inline; animation: bounce .6s steps(1) infinite; }
 .st-done .body { animation: bounce .6s steps(1) infinite; }
-.st-done .icon-confetti { display: inline; }
+.st-done .icon-confetti, .st-done .mood-happy, .st-done .trophy { display: inline; }
+.st-done .trophy { animation: hop 1.2s steps(1) infinite; }
 .st-done .icon-confetti rect { animation: confetti-bit 1.5s steps(5) infinite; }
 .st-done .icon-confetti .c1 { animation-delay: .5s; }
 .st-done .icon-confetti .c2 { animation-delay: 1s; }
 @keyframes confetti-bit { 0% { transform: translateY(-3px); opacity: 1; } 100% { transform: translateY(9px); opacity: 0; } }
 
+/* A short flash of what somebody is doing right now (the tool in use, a failed command, a finished task).
+   It takes the place of the state icon for a moment. */
+.ws.fx-on .icon { display: none !important; }
+.ws.fx-term .fx-term, .ws.fx-search .fx-search, .ws.fx-write .fx-write, .ws.fx-read .fx-read, .ws.fx-web .fx-web,
+.ws.fx-fail .fx-fail, .ws.fx-star .fx-star { display: inline !important; animation: fx-pop .3s steps(3); }
+.ws.fx-fail .body { animation: shake .5s steps(1) infinite; }
+.ws.fx-star .fx-star { animation: bounce .5s steps(1) infinite; }
+@keyframes fx-pop { from { transform: translateY(3px); opacity: 0; } }
+
 /* Joining: the desk still has a moving box on it. Away: the chair is empty while its owner takes a break. */
 .ws.pending .movebox { display: inline; }
 .ws.pending .prop, .ws.pending .mug, .ws.pending .laptop, .ws.pending .icon, .ws.pending .phone { display: none; }
-.ws.away .body, .ws.away .hands, .ws.away .icon, .ws.away .glow, .ws.away .phone, .ws.away .sparks { display: none; }
+.ws.away .body, .ws.away .hands, .ws.away .icon, .ws.away .glow, .ws.away .phone, .ws.away .sparks,
+.ws.away .readdoc, .ws.away .flame { display: none !important; }
 
 /* Furniture that moves on its own. */
 .amb-blink { animation: amb-blink 1.1s steps(1) infinite; }
@@ -271,12 +314,56 @@ body:not(.demo) .demo-only { display: none !important; }
 @keyframes amb-wiggle { 0%, 80%, 100% { transform: none; } 85% { transform: translateX(1px); } 92% { transform: translateX(-1px); } }
 @keyframes amb-lamp { to { opacity: .24; } }
 
+.amb-fan { animation: amb-blink .2s steps(1) infinite; }
+.door-l, .door-r { transition: transform .35s steps(4); }
+.use-door .door-l { transform: translateX(-12px); }
+.use-door .door-r { transform: translateX(12px); }
+
+/* Furniture reacts while somebody uses it (the room gets a use-<name> class). */
+.use-tv .tv-screen { animation: tv 2.4s steps(1) infinite; }
+.tv-line { display: none; }
+.use-tv .tv-line { display: inline; animation: amb-blink .9s steps(1) infinite; }
+@keyframes tv { 0% { fill: #6fa3ef; } 25% { fill: #f2a65a; } 50% { fill: #5cc28f; } 75% { fill: #c27ac9; } }
+.use-pingpong .pp-ball { display: none; }
+.use-arcade .item-arcade .amb-blink, .use-arcade .item-arcade .amb-flicker { animation-duration: .25s; }
+.use-vending .item-vending .amb-blink { animation-duration: .2s; }
+.use-servers .item-servers .amb-blink, .use-servers .item-servers .amb-flicker { animation-duration: .2s; }
+.use-printer .item-printer .amb-paper { animation-duration: 1.4s; }
+.use-coffee .item-coffee .amb-steam, .use-coffee .lounge-kitchen .amb-steam { animation-duration: .5s; }
+.use-aquarium .item-aquarium .amb-fish, .use-pond .lounge-garden .amb-fish { animation-duration: 2.2s; }
+.use-cat .item-cat .amb-zzz { display: none; }
+.use-cat .item-cat .amb-tail { animation-duration: .5s; }
+.cat-away .item-cat .cat-body { display: none; }
+
 /* Scenes on top of the open room: people on a break, tasks flying between desks, confetti. */
 .scene-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
 .walker { position: absolute; animation: walker-pop .25s steps(3); transition: opacity .4s; }
 .walker.outside { opacity: 0; }
 .walker-svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.walker .leg-a, .walker .leg-b, .walker .walker-mug { display: none; }
+.walker .leg-a, .walker .leg-b, .walker .walker-mug, .walker .walker-paddle, .walker .wb-back { display: none; }
+.walker.show-back .wb-front { display: none; }
+.walker.show-back .wb-back { display: inline; }
+.walker.sitting .walker-body { animation: breathe 2.6s steps(1) infinite; }
+.walker.play-pingpong .walker-paddle { display: inline; animation: swing .7s steps(1) infinite; }
+.walker.play-pingpong .walker-body { animation: breathe .7s steps(1) infinite; }
+.walker.play-arcade .walker-body { animation: sway .5s steps(1) infinite; }
+.walker.courier.delivered .walker-parcel { display: none; }
+@keyframes swing { 50% { transform: translate(-2px, -2px); } }
+.npc { position: absolute; }
+.npc.vacuum .walker-svg, .npc.cat .walker-svg, .npc.parcel .walker-svg { overflow: visible; }
+.npc.cat .leg-a, .npc.cat .leg-b { display: none; }
+.npc.cat.walking .leg-s { display: none; }
+.npc.cat.walking .leg-a, .npc.cat.walking .leg-b { display: inline; }
+.npc.cat.walking .leg-a { animation: flap .3s steps(1) infinite; }
+.npc.cat.walking .leg-b { animation: flap .3s steps(1) -.15s infinite; }
+.npc.cat.flip .walker-svg { transform: scaleX(-1); }
+.npc.parcel { animation: walker-pop .25s steps(3); }
+.pp-live {
+  position: absolute; background: #fff; outline: 1px solid #3a2f3f; border-radius: 50%;
+  animation: pp-x .8s linear infinite alternate, pp-y .4s ease-out infinite alternate;
+}
+@keyframes pp-x { from { left: var(--x0); } to { left: var(--x1); } }
+@keyframes pp-y { from { top: var(--y0); } to { top: var(--y1); } }
 .walker.walking .leg-s { display: none; }
 .walker.walking .leg-a, .walker.walking .leg-b { display: inline; }
 .walker.walking .leg-a { animation: flap .36s steps(1) infinite; }
@@ -295,7 +382,7 @@ body:not(.demo) .demo-only { display: none !important; }
 @keyframes confetti-fall { to { top: 104%; transform: translateX(18px) rotate(540deg); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .ws *, .room-svg *, .walker *, .stat-alert, .badge-waiting { animation: none !important; }
+  .ws *, .room-svg *, .walker *, .npc *, .pp-live, .stat-alert, .badge-waiting, .tag-waiting { animation: none !important; }
 }
 
 /* ---------- department view ---------- */
@@ -596,3 +683,7 @@ legend { font-weight: 800; font-size: 12px; padding: 0 4px; }
 .pill-away { background: #e9e4f5; color: #5b3590; }
 .pill-pending { background: #f1ebe2; color: #6b5a4c; }
 .office-banner { background: #fff2c2; border-color: #a77b00; }
+
+/* ---------- the PM's name tag ---------- */
+.tag.pm { box-shadow: 0 0 0 1px #f5c242; }
+.tag.pm b::before { content: "★ "; color: #f5c242; }
