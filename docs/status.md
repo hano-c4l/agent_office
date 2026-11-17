@@ -1,8 +1,7 @@
 # Agent Office: project status
 
 Last updated: 2026-11-18. Production (`main`) contains PR #1 to #5. `preview` also contains the system review and
-room polish (PR #6), not released to `main` yet. The second room update described below is on the branch
-`feature_room_life`, not merged yet.
+room polish (PR #6) and the second room update described below (PR #7), neither released to `main` yet.
 
 ## What works
 
