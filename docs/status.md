@@ -1,8 +1,8 @@
 # Agent Office: project status
 
-Last updated: 2026-11-18. Production (`main`) contains PR #1 to #5. `preview` also contains the system review and
-room polish (PR #6) and the second room update (PR #7), neither released to `main` yet. The third room update
-(swappable room items, more desks and decoration) is on the branch `feature_room_items`, not merged yet.
+Last updated: 2026-11-18. Production (`main`) and `preview` are in line and contain PR #1 to #8: the system review
+and room polish (PR #6), the second room update (PR #7) and the third (PR #8: swappable room items, more desks and
+decoration).
 
 ## What works
 
