@@ -5,15 +5,25 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { DASHBOARD_DIR } from "./paths.mjs";
+import { DASHBOARD_DIR, OFFICE_DIR } from "./paths.mjs";
 import { isValidId, roleCatalog } from "./staff-store.mjs";
 import { listFolders, inspectFolder } from "./workspace-setup.mjs";
 import { Scheduler, runnerConfig } from "./run-controller.mjs";
 import { Company } from "./departments.mjs";
-import { checkRequest } from "./http-guard.mjs";
+import { checkRequest, normalizeHosts } from "./http-guard.mjs";
 
 const PORT = Number(process.argv[2] || process.env.PORT || 5178);
 const MAX_BODY = 1024 * 1024;
+
+// Host names allowed besides localhost: "allowedHosts" in office/server.json plus the ALLOWED_HOSTS variable (comma separated).
+function loadAllowedHosts() {
+  let fromFile = [];
+  try {
+    fromFile = JSON.parse(fs.readFileSync(path.join(OFFICE_DIR, "server.json"), "utf8")).allowedHosts;
+  } catch { /* no file or unreadable: only localhost */ }
+  return normalizeHosts([...(Array.isArray(fromFile) ? fromFile : []), ...String(process.env.ALLOWED_HOSTS || "").split(",")]);
+}
+const ALLOWED_HOSTS = loadAllowedHosts();
 
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -174,7 +184,7 @@ async function handleDepartment(req, res, dept, parts) {
 }
 
 async function handleApi(req, res, url) {
-  const denied = checkRequest(req);
+  const denied = checkRequest(req, ALLOWED_HOSTS);
   if (denied) return send(res, denied.status, { error: denied.error });
   try {
     const parts = url.pathname.split("/").slice(2).map(decodeURIComponent);
@@ -243,6 +253,7 @@ setInterval(() => clients.forEach((res) => res.write(": ping\n\n")), 20000);
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`Agent Office dashboard: http://localhost:${PORT} (${company.list().length} departments)`);
+  if (ALLOWED_HOSTS.length) console.log(`Also answering on: ${ALLOWED_HOSTS.join(", ")}`);
 });
 
 // Stop the PM processes with the server, so no Claude run keeps working (and spending) unseen.
