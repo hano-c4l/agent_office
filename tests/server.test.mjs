@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { checkRequest, hostName } from "../server/http-guard.mjs";
+import { checkRequest, hostName, normalizeHosts } from "../server/http-guard.mjs";
 import { parseAgentFile, serializeAgentFile, StaffStore, isValidId } from "../server/staff-store.mjs";
 import { Scheduler } from "../server/run-controller.mjs";
 import { slugify, Department } from "../server/departments.mjs";
@@ -51,6 +51,20 @@ test("guard: other sites and rebound host names are refused", () => {
     host: "localhost:5178", origin: "https://evil.example", "content-type": "application/json",
   })).status, 403);
   assert.equal(checkRequest(request("GET", { host: "localhost:5178", "sec-fetch-site": "cross-site" })).status, 403);
+});
+
+test("guard: a configured tunnel host name passes, others still do not", () => {
+  const hosts = normalizeHosts(["https://Office.Example.com/", "office.example.com:443", ""]);
+  assert.deepEqual(hosts, ["office.example.com", "office.example.com"]);
+  assert.equal(checkRequest(request("GET", { host: "office.example.com" }), hosts), null);
+  assert.equal(checkRequest(request("POST", {
+    host: "office.example.com", origin: "https://office.example.com", "content-type": "application/json", "sec-fetch-site": "same-origin",
+  }), hosts), null);
+  assert.equal(checkRequest(request("GET", { host: "office.example.com" })).status, 403);
+  assert.equal(checkRequest(request("GET", { host: "evil.example" }), hosts).status, 403);
+  assert.equal(checkRequest(request("POST", {
+    host: "office.example.com", origin: "https://evil.example", "content-type": "application/json",
+  }), hosts).status, 403);
 });
 
 test("guard: writes need a JSON content type and a known method", () => {

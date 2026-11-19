@@ -179,6 +179,13 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
 - The server listens on `127.0.0.1` only and answers API calls only from the dashboard itself: requests from other
   web sites, or through a host name that is not localhost, are refused. Stopping the server stops running PM turns.
 
+### Remote access (Cloudflare Tunnel)
+
+The server still listens on `127.0.0.1` only; a tunnel running on the same machine forwards to it. List the public
+host name in `office/server.json` (`{"allowedHosts": ["office.hanowl.com"]}`) or set `ALLOWED_HOSTS` (comma separated), then
+restart the server. The API has no login of its own: keep **Cloudflare Access** in front of the host name, and never
+expose the port directly. Point the tunnel at `http://127.0.0.1:5178` and keep the original Host header (the default).
+
 ### Demo mode
 
 Open http://localhost:5178/?demo (or serve `dashboard/` with any static server) to see sample departments

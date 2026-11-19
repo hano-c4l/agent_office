@@ -16,6 +16,18 @@ export function isLocalHost(header) {
   return LOCAL_HOSTS.has(name) || name.endsWith(".localhost");
 }
 
+// Extra host names the API answers on, for a tunnel in front of the server (for example Cloudflare Tunnel).
+// Entries are bare host names without a port; the tunnel must also authenticate its visitors (Cloudflare Access).
+export function normalizeHosts(list) {
+  return (Array.isArray(list) ? list : [])
+    .map((entry) => hostName(String(entry || "").replace(/^[a-z]+:\/\//i, "").replace(/\/.*$/, "")))
+    .filter(Boolean);
+}
+
+function isAllowedHost(header, allowedHosts) {
+  return isLocalHost(header) || allowedHosts.includes(hostName(header));
+}
+
 function originHost(origin) {
   try {
     return new URL(origin).host;
@@ -25,11 +37,11 @@ function originHost(origin) {
 }
 
 // Returns null when the request may use the API, or { status, error } when it is refused.
-export function checkRequest(req) {
+export function checkRequest(req, allowedHosts = []) {
   const headers = req.headers || {};
   // A rebound DNS name reaches 127.0.0.1 with its own Host header.
-  if (!isLocalHost(headers.host)) return { status: 403, error: "The API only answers on localhost." };
-  if (headers.origin && !isLocalHost(originHost(headers.origin))) {
+  if (!isAllowedHost(headers.host, allowedHosts)) return { status: 403, error: "The API does not answer on this host name." };
+  if (headers.origin && !isAllowedHost(originHost(headers.origin), allowedHosts)) {
     return { status: 403, error: "Requests from other sites are not allowed." };
   }
   if (headers["sec-fetch-site"] === "cross-site") return { status: 403, error: "Requests from other sites are not allowed." };
