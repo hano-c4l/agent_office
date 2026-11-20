@@ -18,7 +18,8 @@ const READ_TOOLS = new Set(["Read", "Grep", "Glob", "WebSearch", "WebFetch", "Sk
 const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 const BUBBLE_MS = 7000;
 const MAX_FEED = 150;
-const DONE_PREVIEW = 5;
+// Cards shown per task board column until "Show more".
+const COLUMN_PREVIEW = 5;
 const PANEL_DONE_PREVIEW = 3;
 
 const state = {
@@ -35,8 +36,9 @@ const state = {
   draft: null,
   proposal: null, // editable copy of the current department's pending proposal
   proposalDismissed: new Set(),
-  board: { owner: "all", q: "", showAllDone: false },
+  board: { owner: "all", q: "", showAll: {} }, // showAll: { todo, doing, done } expanded columns
   feedTab: "messages",
+  system: { shutdown: null }, // a planned computer shutdown: { at, dryRun }
   panelShowDone: false,
 };
 
@@ -123,7 +125,7 @@ function addMessage(d, m) {
   d.messageIds.add(m.id);
   const time = m.ts ? fmtTime(new Date(m.ts)) : fmtTime();
   if (m.kind === "system") pushFeed(d, { kind: "system", notice: Boolean(m.notice), text: m.text, time });
-  else pushFeed(d, { kind: "msg", from: m.from || "pm", to: m.to || "customer", text: m.text, time });
+  else pushFeed(d, { kind: "msg", from: m.from || "pm", to: m.to || "customer", text: m.text, time, supplement: Boolean(m.supplement) });
 }
 
 function pushFeed(d, item) {
@@ -560,14 +562,15 @@ function renderBoard(d) {
     let items = shown.filter((t) => t.status === key).sort(byTaskId);
     // Latest finished work first.
     if (key === "done") items = items.reverse();
-    const limit = key === "done" && !state.board.showAllDone ? DONE_PREVIEW : Infinity;
+    const expanded = Boolean(state.board.showAll[key]);
+    const limit = expanded ? Infinity : COLUMN_PREVIEW;
     const hidden = Math.max(0, items.length - limit);
     return `<div class="col col-${key}"><h3>${label} <span>${items.length}</span></h3>
       <div class="col-cards">${items.slice(0, limit).map((t) => taskCard(d, t)).join("") ||
         `<p class="muted col-empty">${filtered ? "No match" : "Nothing here"}</p>`}</div>
-      ${hidden ? `<button class="btn small more-btn" data-board-more>Show ${hidden} more</button>` : ""}
-      ${key === "done" && state.board.showAllDone && items.length > DONE_PREVIEW
-        ? `<button class="btn small more-btn" data-board-less>Show less</button>` : ""}</div>`;
+      ${hidden ? `<button class="btn small more-btn" data-board-more="${key}">Show ${hidden} more</button>` : ""}
+      ${expanded && items.length > COLUMN_PREVIEW
+        ? `<button class="btn small more-btn" data-board-less="${key}">Show less</button>` : ""}</div>`;
   }).join("");
 }
 
@@ -589,7 +592,8 @@ function renderFeed(d) {
     const ask = !mine && waiting && f === lastPm;
     return `<li class="chat ${mine ? "mine" : "theirs"}${ask ? " ask" : ""}">
       <div class="chat-head"><b>${esc(mine ? "You" : nameOf(d, f.from))}</b><time>${f.time}</time>
-        ${ask ? `<span class="ask-tag">Needs your reply</span>` : ""}</div>
+        ${ask ? `<span class="ask-tag">Needs your reply</span>` : ""}
+        ${f.supplement ? `<span class="supplement-tag" title="Added to the PM's running turn">Supplement</span>` : ""}</div>
       <p>${esc(f.text)}</p></li>`;
   }).join("") || `<li class="empty">No messages yet. Send a request to ${esc(pmName(d))} at the client desk.</li>`;
 
@@ -625,7 +629,7 @@ function renderClientDesk(d) {
   const mode = runnerMode(d);
   const parts = [];
   if (r.waitingSlot) parts.push(`<span class="dot-busy queued"></span>Queued: ${state.maxParallelRuns} departments are already running.`);
-  else if (r.busy) parts.push(`<span class="dot-busy"></span>${esc(pmName(d))} is working…${r.queued ? ` (${r.queued} message queued)` : ""}`);
+  else if (r.busy) parts.push(`<span class="dot-busy"></span>Office working…${r.queued ? ` (${r.queued} queued)` : ""}`);
   else if (mode === "new") parts.push(d.run && d.run.status === "done" ? "Project delivered. Send a new request any time." : `${esc(pmName(d))} is ready for your request.`);
   else if (mode === "takeover") parts.push("The PM is working with you in a Claude chat.");
   else parts.push(`${esc(pmName(d))} is waiting for your reply.`);
@@ -647,7 +651,24 @@ function renderClientDesk(d) {
     reply: `Reply to ${pmName(d)} (answers, changes, ok)…`,
     takeover: `Reply to ${pmName(d)} here (moves the conversation from chat to here)…`,
   }[mode];
-  $("#liveSend").textContent = { new: "Send request", reply: "Send", takeover: "Take over & send" }[mode];
+  // While the office works, a message is added to the running turn (Supplement) or waits for it to end (Queue).
+  const working = Boolean(r.busy) && mode === "reply";
+  $("#sendMode").hidden = !working;
+  const supplementOk = working && Boolean(r.canSupplement);
+  $("#modeSupplement").disabled = !supplementOk;
+  if (!supplementOk && working) $("#modeQueue").checked = true;
+  else if (!working) $("#modeSupplement").checked = true;
+  const sendMode = working ? (supplementOk && $("#modeSupplement").checked ? "supplement" : "queue") : null;
+  $("#liveSend").textContent = sendMode === "supplement" ? "Supplement" : sendMode === "queue" ? "Queue"
+    : { new: "Send request", reply: "Send", takeover: "Take over & send" }[mode];
+  if (sendMode === "supplement") input.placeholder = `Add to what ${pmName(d)} is doing now (a question, a detail, a change)…`;
+  if (sendMode === "queue") input.placeholder = `Message for ${pmName(d)} after this turn…`;
+  const queue = Array.isArray(r.queue) ? r.queue : [];
+  $("#queueList").hidden = !queue.length;
+  $("#queueList").innerHTML = queue.length ? `<li class="queue-head">Queued, sent after this turn</li>` + queue.map((q) => `
+    <li class="queue-item"><span>${esc(q.text)}</span>
+      <button type="button" class="btn small queue-remove" data-unqueue="${esc(q.id)}" title="Remove from the queue"
+        aria-label="Remove from the queue: ${esc(q.text.slice(0, 60))}">✕ Remove</button></li>`).join("") : "";
   $("#liveStop").hidden = !r.busy;
   $("#liveForm").classList.toggle("disabled", state.demo);
 }
@@ -660,7 +681,7 @@ function openDept(id) {
   state.selectedItem = null;
   state.selectedId = null;
   state.draft = null;
-  state.board = { owner: "all", q: "", showAllDone: false };
+  state.board = { owner: "all", q: "", showAll: {} };
   $("#taskSearch").value = "";
   $("#panel").classList.remove("open");
   try { history.replaceState(null, "", `#dept=${encodeURIComponent(id)}`); } catch { /* ignore */ }
@@ -878,13 +899,14 @@ async function randomizeDesk(id) {
   if (!a) return;
   if (state.live) {
     try {
-      const saved = await api("POST", `/api/departments/${encodeURIComponent(d.id)}/staff/${encodeURIComponent(id)}/desk`);
+      const saved = await api("POST", `/api/departments/${encodeURIComponent(d.id)}/staff/${encodeURIComponent(id)}/desk`,
+        { deskSeed: freshDeskSeed(a, roomSeed(d)) });
       a.deskSeed = saved.deskSeed;
     } catch (err) {
       pushFeed(d, { kind: "system", text: `Could not change ${a.name}'s desk: ${err.message}` });
     }
   } else {
-    a.deskSeed = 1 + Math.floor(Math.random() * 1e9);
+    a.deskSeed = freshDeskSeed(a, roomSeed(d));
   }
   renderAll();
 }
@@ -1014,8 +1036,12 @@ async function randomizeAgent(id) {
       pushFeed(d, { kind: "system", text: `Could not change ${a.name}: ${err.message}` });
     }
   } else {
-    a.look = demoLook();
-    a.name = ["Linh", "Khoa", "Emma", "Kenji", "Mai", "Leo", "Sofia", "Huy"][Math.floor(Math.random() * 8)];
+    // Another name and another hair style and outfit than now.
+    const names = ["Linh", "Khoa", "Emma", "Kenji", "Mai", "Leo", "Sofia", "Huy"].filter((n) => n !== a.name);
+    let look = demoLook();
+    for (let i = 0; i < 50 && a.look && (look.hairStyle === a.look.hairStyle || look.outfit === a.look.outfit); i++) look = demoLook();
+    a.look = look;
+    a.name = names[Math.floor(Math.random() * names.length)];
   }
   renderAll();
 }
@@ -1050,13 +1076,13 @@ async function randomizeRoom() {
   if (!d) return;
   if (state.live) {
     try {
-      const info = await api("POST", `/api/departments/${encodeURIComponent(d.id)}/room/randomize`);
+      const info = await api("POST", `/api/departments/${encodeURIComponent(d.id)}/room/randomize`, { seed: freshRoomSeed(roomSeed(d)) });
       d.info = { ...d.info, roomItems: undefined, ...info };
     } catch (err) {
       pushFeed(d, { kind: "system", text: `Could not change the room: ${err.message}` });
     }
   } else {
-    d.info = { ...d.info, roomSeed: Math.floor(Math.random() * 1e9), roomItems: undefined };
+    d.info = { ...d.info, roomSeed: freshRoomSeed(roomSeed(d)), roomItems: undefined };
   }
   renderAll();
 }
@@ -1374,15 +1400,63 @@ async function sendLiveMessage() {
       d.run = { status: "running", request: text };
       addMessage(d, res.message);
     } else {
-      const res = await api("POST", `${base}/reply`, { text, takeover: mode === "takeover" });
+      const sendMode = !$("#sendMode").hidden && $("#modeQueue").checked ? "queue" : "supplement";
+      const res = await api("POST", `${base}/reply`, { text, takeover: mode === "takeover", mode: sendMode });
       addMessage(d, res.message);
-      if (res.queued) pushFeed(d, { kind: "system", notice: true, text: `${pmName(d)} is busy. Your message is queued.` });
+      d.runner = { ...d.runner, ...pickRunner(res) };
     }
     input.value = "";
   } catch (err) {
     pushFeed(d, { kind: "system", notice: true, text: `Could not send: ${err.message}` });
   }
   renderAll();
+}
+
+// ---------- computer shutdown ----------
+
+let shutdownTicker = null;
+
+function renderShutdown() {
+  const plan = state.system && state.system.shutdown;
+  $("#shutdownBanner").hidden = !plan;
+  $("#shutdownBtn").disabled = Boolean(plan);
+  clearInterval(shutdownTicker);
+  if (!plan) return;
+  const tick = () => {
+    const left = Math.max(0, Math.round((plan.at - Date.now()) / 1000));
+    $("#shutdownText").textContent = (plan.dryRun ? "[dry run] " : "") +
+      (left ? `This computer shuts down in ${left} s. PM runs are stopped and continue after the next start.` : "Shutting down…");
+  };
+  tick();
+  shutdownTicker = setInterval(tick, 1000);
+}
+
+async function requestShutdown() {
+  if (!state.live) return;
+  const busy = [...state.depts.values()].filter((d) => d.runner.busy).map((d) => d.info.name);
+  const note = busy.length ? `
+
+Still working: ${busy.join(", ")}. Their turns are stopped now and continue after the next start.` : "";
+  if (!confirm(`Shut down this computer in one minute?${note}
+
+You can cancel during that minute.`)) return;
+  try {
+    const res = await api("POST", "/api/system/shutdown", { action: "shutdown", confirm: true });
+    state.system = { ...state.system, shutdown: res.shutdown };
+  } catch (err) {
+    alert(err.message);
+  }
+  renderShutdown();
+}
+
+async function cancelShutdown() {
+  try {
+    const res = await api("POST", "/api/system/shutdown", { action: "cancel" });
+    state.system = { ...state.system, shutdown: res.shutdown };
+  } catch (err) {
+    alert(`Could not cancel: ${err.message}`);
+  }
+  renderShutdown();
 }
 
 // ---------- department settings ----------
@@ -1443,6 +1517,25 @@ async function saveSetting(name, value) {
   $("#autoResume").disabled = false;
   renderAll();
   renderSettings();
+}
+
+// The runner fields of an API answer.
+function pickRunner(res) {
+  const out = {};
+  ["busy", "queued", "queue", "canSupplement", "waitingSlot", "lastError"].forEach((k) => { if (k in res) out[k] = res[k]; });
+  return out;
+}
+
+async function removeQueued(id) {
+  const d = cur();
+  if (!d) return;
+  try {
+    const res = await api("DELETE", `/api/departments/${encodeURIComponent(d.id)}/run/queue/${encodeURIComponent(id)}`);
+    d.runner = { ...d.runner, ...pickRunner(res) };
+  } catch (err) {
+    pushFeed(d, { kind: "system", text: `Could not remove the message: ${err.message}` });
+  }
+  renderAll();
 }
 
 async function releaseDept() {
@@ -1800,6 +1893,8 @@ function bindEvents() {
     if (t.closest("#backBtn")) return backToFloor();
     if (t.closest("#hireBtn")) return openHire();
     if (t.closest("#settingsBtn")) return openSettings();
+    if (t.closest("#shutdownBtn")) return requestShutdown();
+    if (t.closest("#cancelShutdownBtn")) return cancelShutdown();
     if (t.closest("#settingsClose") || t.closest("#settingsCancel")) return closeSettings();
     const hireMode = t.closest("[data-hire-mode]");
     if (hireMode) return setHireMode(hireMode.dataset.hireMode);
@@ -1819,8 +1914,12 @@ function bindEvents() {
 
     const feedTab = t.closest("[data-feed-tab]");
     if (feedTab) { state.feedTab = feedTab.dataset.feedTab; return renderFeed(cur()); }
-    if (t.closest("[data-board-more]")) { state.board.showAllDone = true; return renderBoard(cur()); }
-    if (t.closest("[data-board-less]")) { state.board.showAllDone = false; return renderBoard(cur()); }
+    const more = t.closest("[data-board-more]");
+    if (more) { state.board.showAll[more.dataset.boardMore] = true; return renderBoard(cur()); }
+    const less = t.closest("[data-board-less]");
+    if (less) { state.board.showAll[less.dataset.boardLess] = false; return renderBoard(cur()); }
+    const unqueue = t.closest("[data-unqueue]");
+    if (unqueue) return removeQueued(unqueue.dataset.unqueue);
     if (t.closest("[data-panel-done]")) { state.panelShowDone = !state.panelShowDone; return renderPanel(); }
 
     const card = t.closest(".room-card[data-dept]");
@@ -1878,6 +1977,7 @@ function bindEvents() {
 
   document.addEventListener("change", (e) => {
     if (e.target.id === "autoResume") return saveSetting("autoResume", e.target.checked);
+    if (e.target.name === "sendMode") { const d = cur(); if (d) renderClientDesk(d); return; }
     if (e.target.id === "taskOwner") {
       state.board.owner = e.target.value;
       return renderBoard(cur());
@@ -2018,6 +2118,8 @@ function connectLive() {
     state.library = data.library || [];
     state.defaults = data.defaults || state.defaults;
     state.maxParallelRuns = data.maxParallelRuns || 2;
+    state.system = data.system || { shutdown: null };
+    renderShutdown();
     state.depts = new Map((data.departments || []).map((snap) => [snap.info.id, makeDept(snap)]));
     const hash = new URLSearchParams(location.hash.slice(1)).get("dept");
     if (hash && state.depts.has(hash) && !state.view) state.view = hash;
@@ -2066,6 +2168,11 @@ function connectLive() {
   on("pm-text", (d, data) => showBubble(d, findAgent(d, "pm"), data.text, false));
   // PM replies, the customer's messages and notices come from the saved history.
   on("message", (d, m) => addMessage(d, m));
+  source.addEventListener("system", (e) => {
+    heardFromServer();
+    state.system = { ...state.system, ...JSON.parse(e.data) };
+    renderShutdown();
+  });
   source.addEventListener("department-removed", (e) => {
     const msg = JSON.parse(e.data);
     state.depts.delete(msg.dept);

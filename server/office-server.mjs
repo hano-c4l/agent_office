@@ -11,6 +11,7 @@ import { listFolders, inspectFolder } from "./workspace-setup.mjs";
 import { Scheduler, runnerConfig } from "./run-controller.mjs";
 import { Company } from "./departments.mjs";
 import { checkRequest, normalizeHosts } from "./http-guard.mjs";
+import { runShutdownCommand, SHUTDOWN_DELAY_S } from "./system-control.mjs";
 
 const PORT = Number(process.argv[2] || process.env.PORT || 5178);
 const MAX_BODY = 1024 * 1024;
@@ -65,9 +66,13 @@ function broadcast(type, data) {
 
 const company = new Company({ scheduler: new Scheduler(), broadcast });
 
+// A computer shutdown requested from the dashboard: { at, dryRun } until it happens or is cancelled.
+let shutdownState = null;
+
 function snapshot() {
   const cfg = runnerConfig();
   return {
+    system: { shutdown: shutdownState, platform: process.platform },
     defaults: company.defaults(),
     maxParallelRuns: cfg.maxParallelRuns,
     library: roleCatalog(),
@@ -129,7 +134,8 @@ async function handleDepartment(req, res, dept, parts) {
       return agent ? send(res, 200, agent) : send(res, 404, { error: "Not found" });
     }
     if (req.method === "POST" && action === "desk") {
-      const agent = dept.store.randomizeDesk(sub);
+      const body = await readBody(req);
+      const agent = dept.store.randomizeDesk(sub, body.deskSeed);
       return agent ? send(res, 200, agent) : send(res, 404, { error: "Not found" });
     }
     if (req.method === "POST" && action === "helper") {
@@ -155,8 +161,17 @@ async function handleDepartment(req, res, dept, parts) {
     const body = await readBody(req);
     const runner = dept.runner;
     if (sub === "start") { const started = runner.start(body.request); return send(res, 200, { ...runner.publicState(), ...started }); }
-    if (sub === "reply") return send(res, 200, { ...runner.reply(body.text, { takeover: Boolean(body.takeover) }), ...runner.publicState() });
+    if (sub === "reply") {
+      const mode = body.mode === "queue" ? "queue" : "supplement";
+      return send(res, 200, { ...runner.reply(body.text, { takeover: Boolean(body.takeover), mode }), ...runner.publicState() });
+    }
     if (sub === "stop") { runner.stop(); return send(res, 200, runner.publicState()); }
+  }
+
+  // Removes a message that still waits in the PM's queue.
+  if (section === "run" && sub === "queue" && parts[2] && req.method === "DELETE") {
+    if (!dept.runner.removeQueued(parts[2])) return send(res, 404, { error: "That message is no longer in the queue." });
+    return send(res, 200, dept.runner.publicState());
   }
 
   if (section === "settings" && !sub && req.method === "GET") return send(res, 200, dept.settings());
@@ -168,7 +183,7 @@ async function handleDepartment(req, res, dept, parts) {
   }
 
   if (section === "room" && sub === "randomize" && req.method === "POST") {
-    dept.randomizeRoom();
+    dept.randomizeRoom((await readBody(req)).seed);
     company.save();
     broadcast("department-info", { dept: dept.id, data: dept.publicInfo() });
     return send(res, 200, dept.publicInfo());
@@ -220,6 +235,32 @@ async function handleApi(req, res, url) {
       const target = url.searchParams.get("path") || "";
       if (id === "list") return send(res, 200, listFolders(target));
       if (id === "inspect") return send(res, 200, await inspectFolder(target));
+    }
+
+    // Shuts down this computer after a short delay: PM turns are stopped first and saved as cut off,
+    // so the next start continues them. { action: "shutdown" | "cancel" }
+    if (resource === "system" && id === "shutdown" && req.method === "POST") {
+      const body = await readBody(req);
+      if (body.action === "cancel") {
+        if (!shutdownState) return send(res, 409, { error: "No shutdown is planned." });
+        await runShutdownCommand("cancel");
+        shutdownState = null;
+        company.list().forEach((d) => d.runner.cancelShutdown());
+      } else if (body.action === "shutdown") {
+        if (body.confirm !== true) return send(res, 400, { error: "Confirm the shutdown." });
+        company.list().forEach((d) => d.runner.shutdown());
+        try {
+          const result = await runShutdownCommand("shutdown");
+          shutdownState = { at: Date.now() + SHUTDOWN_DELAY_S * 1000, dryRun: result.dryRun };
+        } catch (err) {
+          company.list().forEach((d) => d.runner.cancelShutdown());
+          return send(res, 500, { error: `Could not shut down: ${err.message}` });
+        }
+      } else {
+        return send(res, 400, { error: "Unknown action." });
+      }
+      broadcast("system", { shutdown: shutdownState });
+      return send(res, 200, { shutdown: shutdownState });
     }
 
     if (resource === "departments") {
@@ -280,9 +321,10 @@ server.listen(PORT, "127.0.0.1", () => {
   if (ALLOWED_HOSTS.length) console.log(`Also answering on: ${ALLOWED_HOSTS.join(", ")}`);
 });
 
-// Stop the PM processes with the server, so no Claude run keeps working (and spending) unseen.
+// Stop the PM processes with the server, so no Claude run keeps working (and spending) unseen. A turn that is cut
+// off is saved as such, and the next start continues it (see RunController.afterRestart).
 function shutdown() {
-  company.list().forEach((d) => d.runner.stop());
+  company.list().forEach((d) => d.runner.shutdown());
   clients.forEach((res) => res.end());
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1500).unref();

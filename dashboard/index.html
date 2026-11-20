@@ -14,8 +14,16 @@
       <span class="mode-badge live-only">LIVE</span><span class="mode-badge demo demo-only">DEMO</span>
       <span class="mode-badge offline" id="offlineBadge" hidden title="The live stream dropped; reconnecting">RECONNECTING…</span></div>
     <div class="company-stats" id="companyStats"></div>
-    <button class="btn primary" id="newDeptBtn">+ Department</button>
+    <div class="topbar-actions">
+      <button class="btn primary" id="newDeptBtn">+ Department</button>
+      <button class="btn danger live-only" id="shutdownBtn" title="Stop every PM run and shut down this computer"
+        aria-label="Shut down this computer">⏻ Shutdown</button>
+    </div>
   </header>
+  <div class="shutdown-banner" id="shutdownBanner" role="status" hidden>
+    <span id="shutdownText"></span>
+    <button class="btn small" id="cancelShutdownBtn">Cancel shutdown</button>
+  </div>
 
   <!-- Company floor: every department is a room -->
   <main id="floorView" class="floor-view">
@@ -83,6 +91,14 @@
           <div class="need-banner" id="needBanner" hidden>✋ <span id="needText"></span>
             <button class="btn small" id="reviewTeamBtn" hidden>Review team</button></div>
           <div class="runner-status" id="runnerStatus" aria-live="polite"></div>
+          <ul class="queue-list" id="queueList" hidden aria-label="Queued messages"></ul>
+          <fieldset class="send-mode" id="sendMode" hidden>
+            <legend class="sr-only">How to send while the office works</legend>
+            <label><input type="radio" name="sendMode" value="supplement" id="modeSupplement" checked>
+              <b>Supplement</b> <span class="muted">add to the current turn</span></label>
+            <label><input type="radio" name="sendMode" value="queue" id="modeQueue">
+              <b>Queue</b> <span class="muted">send after this turn</span></label>
+          </fieldset>
           <form id="liveForm" class="request-form">
             <textarea id="liveInput" rows="3" aria-label="Message to the PM"></textarea>
             <div class="live-buttons">

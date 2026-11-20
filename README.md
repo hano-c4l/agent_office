@@ -148,15 +148,31 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
   PM's replies, approvals, errors) with "Needs your reply" on the PM's open question; **Activity** holds the team's
   work (tools, delegation, reports). The messages are saved in the workspace (`.office/messages.jsonl`), so they are
   still there after the server restarts.
+- **While the office works** ("Office working…"), choose how a message goes:
+  - **Supplement** (default): it joins the PM's running turn right away, like typing in Claude Code while it works
+    (a quick question, a detail, a change). The PM runs with streaming input (`--input-format stream-json`) and gets
+    the message at its next step (`priority: "next"`). It is marked "Supplement" in Messages.
+  - **Queue**: it waits until the turn ends. Queued messages are listed above the input with **✕ Remove**, saved
+    with the runner state, and shown in Messages only when they are sent.
 - **⚙ Settings** (room header): options per department.
   - **Auto continue after the usage limit resets** (default OFF): when the PM stops on a usage limit such as the 5-hour
     limit, the server reads the reset time from the Claude CLI, waits until a minute after it and tells the PM to
     continue in the same session. Messages you sent meanwhile follow. The planned time survives a server restart, a
     message from you or **Stop** replaces it, and without a known reset time it tries again every 30 minutes (12
     tries, six hours, longer than a 5-hour window). The server must keep running; the room shows "Usage limit, continues HH:MM".
-- **Task board**: search, filter by owner, scrolling columns; Done shows the latest five until you expand it.
+- **Task board**: search, filter by owner; every column (To do, Doing, Done) shows five cards until **Show more**.
+- **🎲 buttons** (room, item, desk, person) always give something different from what is there now: another
+  layout, lounge and colors; another item; another desk shape and computer (another executive desk and chair for the
+  PM); another name, hair style and outfit.
   Setup work by the PM (writing the PM profile, creating the team, writing skills) shows as `S` tasks.
 - **Release to main** merges `preview` into `main`; **Confirm migration** appears while a migrated project waits.
+- **Office tools**: every department gets three read-only Haiku subagents, `search` (repo map), `grep` (call sites)
+  and `docs` (API documentation), from `templates/workspace/.claude/agents/`. The CLAUDE.md section tells the team to
+  use them instead of reading many files with a bigger model, which saves usage. They join as **assistants**, not
+  staff (no tasks, not counted); **Move to staff** works as for any assistant. When the project already has a
+  different agent with the same name, that agent is kept and the tool is installed as `office_<name>` (for example
+  `office_search`); the CLAUDE.md rule names the tools as installed. Existing departments get them with
+  **Update office files**.
 - **Update office files** appears when a department still has the hooks, `/office` skill or CLAUDE.md section of an
   older Agent Office version. It installs the current ones and commits only those files on the current branch (not on
   `main`); your agents and their skills are not touched.
@@ -185,6 +201,18 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
 - Git pushes use the git credentials already set up on this machine.
 - The server listens on `127.0.0.1` only and answers API calls only from the dashboard itself: requests from other
   web sites, or through a host name that is not localhost, are refused. Stopping the server stops running PM turns.
+
+### Stopping the server or the computer
+
+- Stopping the server never loses the state: the session, tasks, message history, usage limit, planned resume and
+  queued messages are saved in the workspace (`.office/`), and nothing is run again from the start.
+- A turn cut off by the stop (Ctrl+C, a crash, the computer shutting down) is marked in `.office/runner-state.json`.
+  After the next start the room says so. With **auto continue** on, the PM continues in the same session about 20
+  seconds after the start (checking git and the task board first, without redoing finished tasks); with it off,
+  send a message such as "continue". A turn that hit a usage limit and was planned to resume keeps its time.
+- **⏻ Shutdown** (top bar) stops every PM turn (saved as cut off) and shuts the computer down after one minute
+  (`shutdown /s /t 60` on Windows). A red banner counts down; **Cancel shutdown** cancels it (`shutdown /a`) and the
+  departments carry on as after a restart. `OFFICE_SHUTDOWN_DRY_RUN=1` logs the command instead of running it.
 
 ### Remote access (Cloudflare Tunnel)
 

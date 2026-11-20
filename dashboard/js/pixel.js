@@ -1063,6 +1063,22 @@ function gearFor(agent, seed = 0) {
   };
 }
 
+// A new desk number whose desk looks different from the current one: another shape and computer
+// (for the PM, another executive desk and chair). A few choices would otherwise often roll the same desk.
+function freshDeskSeed(agent, seed = 0) {
+  const now = gearFor(agent, seed);
+  let next = 1;
+  for (let i = 0; i < 500; i++) {
+    next = 1 + Math.floor(Math.random() * 1e9);
+    const gear = gearFor({ ...agent, deskSeed: next }, seed);
+    const differs = agent.id === "pm"
+      ? gear.exec !== now.exec && gear.execChair !== now.execChair
+      : gear.shape !== now.shape && gear.computer !== now.computer;
+    if (differs && next !== agent.deskSeed) break;
+  }
+  return next;
+}
+
 // The same in words, for the staff panel.
 function gearSummary(agent, seed = 0) {
   const gear = gearFor(agent, seed);
@@ -1656,6 +1672,18 @@ function roomStyle(seed, items = {}) {
   });
   style.variant = (slot) => (items[slot] && Number.isInteger(items[slot].v) ? items[slot].v : hashOf(`${seed}:${slot}`)) % 1000;
   return style;
+}
+
+// A new room seed whose room looks different from the current one: another layout, lounge and colors.
+function freshRoomSeed(seed) {
+  const now = roomStyle(seed);
+  let next = 0;
+  for (let i = 0; i < 500; i++) {
+    next = Math.floor(Math.random() * 1e9);
+    const style = roomStyle(next);
+    if (next !== seed && style.layout !== now.layout && style.lounge !== now.lounge && style.palette !== now.palette) break;
+  }
+  return next;
 }
 
 // What a slot holds: its kind, name and description, and what staff do there.

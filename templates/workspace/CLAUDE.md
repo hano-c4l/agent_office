@@ -10,6 +10,11 @@ The Agent Office dashboard watches this folder and lets the customer follow and 
   Only the PM and the dashboard change them.
 - `.office/`: live office state (events, tasks, team proposal, staff names and looks). Ignored by git.
 
+## Subagents
+- Use `{{TOOL_search}}` for repo maps, `{{TOOL_grep}}` for call sites, and `{{TOOL_docs}}` for API documentation. All three are read-only Haiku agents.
+- They are assistants, not staff: they never get tasks on the board. Any team member may call them instead of reading
+  many files with a bigger model.
+
 ## Language
 - Talk to the customer in Vietnamese.
 - Everything in the repository (code, comments, docs, commit messages, logs) is in English.

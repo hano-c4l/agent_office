@@ -96,6 +96,8 @@ function mergeSettings(file, templateFile) {
 
 function claudeMdSection(department) {
   return fs.readFileSync(path.join(TEMPLATE_WORKSPACE_DIR, "CLAUDE.md"), "utf8")
+    // The office tools under the names they have in this workspace.
+    .replace(/\{\{TOOL_([a-z]+)\}\}/g, (_, tool) => (department.workspace ? officeToolName(department.workspace, tool) : tool))
     .replace(/\{\{DEPARTMENT\}\}/g, department.name)
     .replace(/\{\{REMOTE_NOTE\}\}/g, department.repo ? ` (remote: ${department.repo})` : "")
     .trim();
@@ -126,10 +128,51 @@ function ensureGitignore(root) {
   fs.writeFileSync(file, `${text}${prefix}# Agent Office live state\n.office/\n`);
 }
 
-// The files Agent Office owns in a workspace: hooks, the /office skill, the hook settings and the CLAUDE.md section.
+// Office tools: read-only subagents (search, grep, docs) every department gets. They are tools, not staff.
+const TOOL_AGENTS_DIR = path.join(TEMPLATE_WORKSPACE_DIR, ".claude", "agents");
+
+export function officeToolIds() {
+  try {
+    return fs.readdirSync(TOOL_AGENTS_DIR).filter((f) => f.endsWith(".md")).map((f) => path.basename(f, ".md"));
+  } catch {
+    return [];
+  }
+}
+
+// The tool's agent file under the given agent id.
+function toolTemplate(tool, id) {
+  const text = fs.readFileSync(path.join(TOOL_AGENTS_DIR, `${tool}.md`), "utf8");
+  return id === tool ? text : text.replace(new RegExp(`^name:\\s*${tool}\\s*$`, "m"), `name: ${id}`);
+}
+
+// The agent id of an office tool in a workspace: the tool's own name, or office_<name> when the project
+// already has a different agent with that name (the project's agent is kept, the tool is still installed).
+export function officeToolName(root, tool) {
+  const installed = new StaffStore(root).toolAgentId(tool);
+  if (installed) return installed;
+  const own = path.join(root, ".claude", "agents", `${tool}.md`);
+  if (fs.existsSync(own) && normalize(fs.readFileSync(own, "utf8")) !== normalize(toolTemplate(tool, tool))) return `office_${tool}`;
+  return tool;
+}
+
+// Installs the office tools as assistants, or updates the ones installed earlier to the current version.
+function installToolAgents(root) {
+  const store = new StaffStore(root);
+  const dir = path.join(root, ".claude", "agents");
+  for (const tool of officeToolIds()) {
+    const id = officeToolName(root, tool);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${id}.md`), toolTemplate(tool, id));
+    store.setTool(id, tool);
+  }
+}
+
+// The files Agent Office owns in a workspace: hooks, the /office skill, the office tools, the hook settings and
+// the CLAUDE.md section.
 function copyOfficeFiles(root, department) {
   copyDir(path.join(TEMPLATE_WORKSPACE_DIR, ".claude", "hooks"), path.join(root, ".claude", "hooks"));
   copyDir(path.join(TEMPLATE_WORKSPACE_DIR, ".claude", "skills"), path.join(root, ".claude", "skills"));
+  installToolAgents(root);
   mergeSettings(path.join(root, ".claude", "settings.json"), path.join(TEMPLATE_WORKSPACE_DIR, ".claude", "settings.json"));
   writeClaudeMd(root, department);
   ensureGitignore(root);
@@ -155,6 +198,13 @@ export function officeFilesOutdated(root, department) {
         if (normalize(fs.readFileSync(installed, "utf8")) !== normalize(fs.readFileSync(path.join(src, rel), "utf8"))) return true;
       }
     }
+    const store = new StaffStore(root);
+    for (const tool of officeToolIds()) {
+      const id = store.toolAgentId(tool);
+      if (!id) return true; // not installed yet
+      const installed = path.join(root, ".claude", "agents", `${id}.md`);
+      if (!fs.existsSync(installed) || normalize(fs.readFileSync(installed, "utf8")) !== normalize(toolTemplate(tool, id))) return true;
+    }
     const claudeMd = path.join(root, "CLAUDE.md");
     if (!fs.existsSync(claudeMd)) return true;
     return !normalize(fs.readFileSync(claudeMd, "utf8")).includes(normalize(claudeMdSection(department)));
@@ -164,6 +214,7 @@ export function officeFilesOutdated(root, department) {
 }
 
 const OFFICE_PATHS = ["CLAUDE.md", ".gitignore", ".claude/hooks", ".claude/skills/office", ".claude/settings.json"];
+const officePaths = (root) => [...OFFICE_PATHS, ...officeToolIds().map((tool) => `.claude/agents/${officeToolName(root, tool)}.md`)];
 
 // Brings the office files of an existing department up to this Agent Office version and commits only
 // those files on the current branch, so they reach preview with the team's normal flow.
@@ -173,9 +224,9 @@ export async function updateOfficeFiles(root, department) {
   const warnings = [];
   copyOfficeFiles(root, department);
   writeDepartmentFile(root, department);
-  log.push("Updated the office files (hooks, /office skill, settings, CLAUDE.md section).");
+  log.push("Updated the office files (hooks, /office skill, office tools, settings, CLAUDE.md section).");
   if (!fs.existsSync(path.join(root, ".git"))) return { log, warnings };
-  const changed = (await git(root, ["status", "--porcelain", "--", ...OFFICE_PATHS])).out;
+  const changed = (await git(root, ["status", "--porcelain", "--", ...officePaths(root)])).out;
   if (!changed) {
     log.push("Nothing to commit: the repository already had these files.");
     return { log, warnings };
@@ -185,8 +236,8 @@ export async function updateOfficeFiles(root, department) {
     warnings.push(`The update is not committed because the workspace is on ${branch || "a detached HEAD"}. Ask the PM to commit it on a feature branch.`);
     return { log, warnings };
   }
-  await git(root, ["add", "--", ...OFFICE_PATHS]);
-  await git(root, ["commit", "-q", "-m", "Update Agent Office files", "--", ...OFFICE_PATHS]);
+  await git(root, ["add", "--", ...officePaths(root)]);
+  await git(root, ["commit", "-q", "-m", "Update Agent Office files", "--", ...officePaths(root)]);
   log.push(`Committed the update on ${branch}.`);
   return { log, warnings };
 }
