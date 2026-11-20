@@ -9,7 +9,8 @@ import path from "node:path";
 
 import { checkRequest, hostName, normalizeHosts } from "../server/http-guard.mjs";
 import { parseAgentFile, serializeAgentFile, StaffStore, isValidId } from "../server/staff-store.mjs";
-import { Scheduler, parseResetTime, RESUME_PROMPT } from "../server/run-controller.mjs";
+import { Scheduler, parseResetTime, RESUME_PROMPT, RESTART_PROMPT, INTERRUPTED_ERROR } from "../server/run-controller.mjs";
+import { shutdownCommand } from "../server/system-control.mjs";
 import { slugify, Department } from "../server/departments.mjs";
 import { guessRole, titleFromId, randomPerson } from "../server/people.mjs";
 import {
@@ -284,6 +285,167 @@ test("usage limit: an ordinary error does not count as a limit", (t) => {
   assert.match(dept.recentMessages().at(-1).text, /The PM stopped: Tool failed/);
 });
 
+// ---------- server restarts and computer shutdown ----------
+
+test("restart: a turn cut off by a server stop is reported, never run again by itself", (t) => {
+  const root = tempDir(t);
+  const dept = new Department(department(root), { scheduler: new Scheduler(), broadcast() {} });
+  const runner = dept.runner;
+  Object.assign(runner.state, { sessionId: "s-3", origin: "dashboard", busy: true });
+  runner.activeTurn = { startedAt: new Date().toISOString() };
+  runner.queue = ["Also add a footer"];
+  runner.shutdown();
+
+  const again = new Department(department(root), { scheduler: new Scheduler(), broadcast() {} });
+  const prompts = [];
+  again.runner.spawnTurn = (prompt) => prompts.push(prompt);
+  assert.equal(again.runner.state.lastError, INTERRUPTED_ERROR);
+  assert.ok(again.runner.state.interrupted);
+  assert.deepEqual(again.runner.queue.map((q) => q.text), ["Also add a footer"], "queued messages survive (old format too)");
+  assert.equal(again.runner.publicState().queue[0].text, "Also add a footer");
+  assert.equal(again.runner.state.resumeAt, null, "auto continue is off: nothing starts");
+  assert.match(again.recentMessages().at(-1).text, /stopped during the PM's turn.*1 queued message/);
+  assert.deepEqual(prompts, []);
+});
+
+test("restart: with auto continue on, a cut-off turn continues in the same session", (t) => {
+  const root = tempDir(t);
+  const dept = new Department(department(root), { scheduler: new Scheduler(), broadcast() {} });
+  dept.updateSettings({ autoResume: true });
+  Object.assign(dept.runner.state, { sessionId: "s-4", origin: "dashboard", busy: true });
+  dept.runner.activeTurn = { startedAt: new Date().toISOString() };
+  dept.runner.shutdown();
+
+  const again = new Department({ ...department(root), settings: { autoResume: true } }, { scheduler: new Scheduler(), broadcast() {} });
+  const runner = again.runner;
+  t.after(() => runner.cancelResume());
+  assert.equal(runner.state.resumeReason, "restart");
+  assert.ok(runner.state.resumeAt > Date.now() && runner.state.resumeAt < Date.now() + 60000);
+  const prompts = [];
+  runner.spawnTurn = (prompt) => prompts.push(prompt);
+  runner.resumeNow();
+  assert.deepEqual(prompts, [RESTART_PROMPT]);
+  assert.equal(runner.state.sessionId, "s-4");
+});
+
+test("restart: a turn waiting for a run slot keeps its prompt, and a cancelled shutdown carries on", (t) => {
+  const root = tempDir(t);
+  const dept = new Department(department(root), { scheduler: new Scheduler(), broadcast() {} });
+  const runner = dept.runner;
+  Object.assign(runner.state, { sessionId: "s-5", origin: "dashboard", busy: true, waitingSlot: true });
+  runner.pendingPrompt = "Build the cart";
+  runner.shutdown();
+  assert.throws(() => runner.reply("hello"), /shutting down/);
+  runner.cancelShutdown();
+  assert.equal(runner.state.busy, false);
+  assert.deepEqual(runner.queue.map((q) => q.text), ["Build the cart"]);
+  assert.equal(runner.publicState().queue.length, 0, "the office's own prompt is not listed as a customer message");
+});
+
+test("shutdown: the command fits the platform and can be cancelled", () => {
+  assert.deepEqual(shutdownCommand("shutdown", { platform: "win32", delay: 60 })[1].slice(0, 3), ["/s", "/t", "60"]);
+  assert.deepEqual(shutdownCommand("cancel", { platform: "win32" }), ["shutdown", ["/a"]]);
+  assert.deepEqual(shutdownCommand("shutdown", { platform: "linux", delay: 60 }), ["shutdown", ["-h", "+1"]]);
+  assert.deepEqual(shutdownCommand("cancel", { platform: "linux" }), ["shutdown", ["-c"]]);
+});
+
+// ---------- supplements and the queue ----------
+
+// A stand-in for the Claude process: records what the runner writes to its input.
+function fakeChild() {
+  const written = [];
+  return { written, stdin: { write: (line) => written.push(JSON.parse(line)), end() { this.ended = true; }, on() {} }, kill() {} };
+}
+
+test("supplement: a message sent while the office works joins the running turn", (t) => {
+  const root = tempDir(t);
+  const dept = new Department(department(root), { scheduler: new Scheduler(), broadcast() {} });
+  const runner = dept.runner;
+  const child = fakeChild();
+  Object.assign(runner.state, { sessionId: "s-6", origin: "dashboard", busy: true });
+  Object.assign(runner, { child, inputOpen: true });
+
+  const res = runner.reply("Also support dark mode", { mode: "supplement" });
+  assert.equal(res.supplemented, true);
+  assert.deepEqual(child.written.at(-1), {
+    type: "user", message: { role: "user", content: "Also support dark mode" }, parent_tool_use_id: null, priority: "next",
+  });
+  assert.equal(dept.recentMessages().at(-1).supplement, true);
+
+  // Once the turn has its result, input is closed and later messages wait in the queue.
+  runner.handleLine(JSON.stringify({ type: "result", is_error: false, result: "Done", queued_turn_count: 0 }));
+  runner.closeInput();
+  const queued = runner.reply("Then deploy it", { mode: "supplement" });
+  assert.equal(queued.queued, true);
+  assert.equal(runner.publicState().queue[0].text, "Then deploy it");
+  assert.ok(!dept.recentMessages().some((m) => m.text === "Then deploy it"), "a queued message is recorded when it is sent");
+});
+
+test("queue: a waiting message can be removed; the office's own instructions cannot", (t) => {
+  const root = tempDir(t);
+  const dept = new Department(department(root), { scheduler: new Scheduler(), broadcast() {} });
+  const runner = dept.runner;
+  Object.assign(runner.state, { sessionId: "s-7", origin: "dashboard", busy: true });
+  runner.reply("First", { mode: "queue" });
+  runner.reply("I approved the team", { note: null });
+  runner.reply("Second", { mode: "queue" });
+  const listed = runner.publicState().queue;
+  assert.deepEqual(listed.map((q) => q.text), ["First", "Second"]);
+  assert.equal(runner.removeQueued(listed[0].id), true);
+  assert.equal(runner.removeQueued("nope"), false);
+  assert.deepEqual(runner.queue.map((q) => q.text), ["I approved the team", "Second"]);
+  const hidden = runner.queue[0].id;
+  assert.equal(runner.removeQueued(hidden), false);
+
+  // The next message is recorded when the turn that was running ends and it is sent.
+  const prompts = [];
+  runner.spawnTurn = (prompt) => prompts.push(prompt);
+  runner.finish(null);
+  assert.deepEqual(prompts, ["I approved the team"]);
+});
+
+// ---------- office tools and random picks ----------
+
+test("office tools: a project agent with the same name is kept and the tool gets an office_ name", async (t) => {
+  const root = tempDir(t);
+  fs.mkdirSync(path.join(root, ".claude", "agents"), { recursive: true });
+  fs.writeFileSync(path.join(root, "app.txt"), "existing project\n");
+  fs.writeFileSync(path.join(root, ".claude", "agents", "search.md"), "---\nname: search\ndescription: Our own web search\n---\nSearch the web.\n");
+  await git(root, ["init", "-q", "-b", "main"]);
+  await git(root, ["add", "."]);
+  await git(root, ["commit", "-q", "-m", "Project"]);
+  const info = department(root, { mode: "migrate" });
+  await migrateWorkspace(info);
+
+  assert.match(fs.readFileSync(path.join(root, ".claude", "agents", "search.md"), "utf8"), /Our own web search/, "the project's agent is kept");
+  const tool = fs.readFileSync(path.join(root, ".claude", "agents", "office_search.md"), "utf8");
+  assert.match(tool, /^name: office_search$/m);
+  const store = new StaffStore(root);
+  assert.equal(store.toolAgentId("search"), "office_search");
+  assert.ok(store.helpers().some((h) => h.id === "office_search"), "the renamed tool is an assistant");
+  const claudeMd = fs.readFileSync(path.join(root, "CLAUDE.md"), "utf8");
+  assert.match(claudeMd, /Use `office_search` for repo maps, `grep` for call sites, and `docs`/);
+  assert.equal(officeFilesOutdated(root, info), false);
+});
+
+test("random: a new name, look, desk or room always differs from the current one", (t) => {
+  const root = tempDir(t);
+  const store = new StaffStore(root);
+  store.ensureIdentity("dev", { title: "Developer", role: "dev" });
+  for (let i = 0; i < 40; i++) {
+    const before = store.get("dev");
+    const after = store.randomize("dev");
+    assert.notEqual(after.name, before.name);
+    assert.notEqual(after.look.hairStyle, before.look.hairStyle);
+    assert.notEqual(after.look.outfit, before.look.outfit);
+  }
+  assert.equal(store.randomizeDesk("dev", 4242).deskSeed, 4242, "the dashboard's pick is kept");
+  assert.notEqual(store.randomizeDesk("dev", 4242).deskSeed, 4242, "the same number again is not a new desk");
+  const dept = new Department(department(root, { roomSeed: 7 }), { scheduler: new Scheduler(), broadcast() {} });
+  assert.equal(dept.randomizeRoom(99).roomSeed, 99);
+  assert.notEqual(dept.randomizeRoom(99).roomSeed, 99);
+});
+
 // ---------- scheduler ----------
 
 test("scheduler runs at most maxParallelRuns and hands the slot on", () => {
@@ -314,12 +476,22 @@ test("new workspace: main and preview, office files, then an update of old offic
   assert.equal((await git(root, ["status", "--porcelain"])).out, "", "the setup is committed");
   assert.equal(officeFilesOutdated(root, dept), false);
 
+  // The office tools join as assistants: not staff, and still movable to the staff like any assistant.
+  const store = new StaffStore(root);
+  assert.deepEqual(store.helpers().map((h) => h.id).sort(), ["docs", "grep", "search"]);
+  assert.ok(!store.list().some((a) => ["docs", "grep", "search"].includes(a.id)));
+  assert.match(fs.readFileSync(path.join(root, "CLAUDE.md"), "utf8"), /## Subagents/);
+  store.setHelper("docs", false);
+  assert.ok(store.list().some((a) => a.id === "docs"), "an office tool can be moved to the staff");
+  store.setHelper("docs", true);
+
   const folder = await inspectFolder(root);
   assert.equal(folder.suggest, "open");
   assert.equal(folder.department.name, "Shop");
 
   // An older skill and a project hook of its own: the update replaces the first and keeps the second.
   fs.writeFileSync(path.join(root, ".claude", "skills", "office", "SKILL.md"), "old skill\n");
+  fs.rmSync(path.join(root, ".claude", "agents", "grep.md"));
   const settingsFile = path.join(root, ".claude", "settings.json");
   const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
   settings.hooks.Stop.unshift({ hooks: [{ type: "command", command: "echo mine" }] });
@@ -335,6 +507,7 @@ test("new workspace: main and preview, office files, then an update of old offic
   const merged = JSON.parse(fs.readFileSync(settingsFile, "utf8")).hooks.Stop;
   assert.equal(merged.length, 2);
   assert.equal(merged[0].hooks[0].command, "echo mine");
+  assert.ok(fs.existsSync(path.join(root, ".claude", "agents", "grep.md")), "a missing office tool comes back");
 
   // Release: preview reaches main and the workspace returns to preview.
   const release = await releaseToMain(root);

@@ -218,14 +218,38 @@ export class StaffStore {
     return changed;
   }
 
-  // Helper agents: existing project agents the customer did not take on as staff.
+  // Helper agents: existing project agents the customer did not take on as staff, and the office tools
+  // (read-only subagents Agent Office installs, such as search, grep and docs).
   helpers() {
     const meta = this.readMeta();
     return this.agentFiles().map((file) => {
       const { front } = parseAgentFile(fs.readFileSync(path.join(this.agentsDir, file), "utf8"));
       const id = front.name || path.basename(file, ".md");
-      return { id, description: front.description || "", model: front.model || "inherit", helper: Boolean(meta[id]?.helper) };
+      return {
+        id, description: front.description || "", model: front.model || "inherit",
+        helper: Boolean(meta[id]?.helper), tool: Boolean(meta[id]?.tool),
+      };
     }).filter((a) => a.helper);
+  }
+
+  isTool(id) {
+    return Boolean(this.readMeta()[id]?.tool);
+  }
+
+  // The agent id an office tool was installed under ("search", or "office_search" when the project has its own).
+  toolAgentId(tool) {
+    const meta = this.readMeta();
+    return Object.keys(meta).find((id) => meta[id]?.tool && (meta[id].toolOf || id) === tool) || null;
+  }
+
+  // An office tool joins as an assistant (no name, look, desk or tasks). The customer may still move it to the
+  // staff later; it keeps the tool mark, so an office update refreshes its file but never moves it back.
+  setTool(id, tool = id) {
+    if (!isValidId(id)) throw new Error(`Invalid agent id: ${id}`);
+    const meta = this.readMeta();
+    if (meta[id]?.tool) return;
+    meta[id] = { ...(meta[id] || {}), helper: true, tool: true, ...(tool !== id ? { toolOf: tool } : {}) };
+    this.writeMeta(meta);
   }
 
   setHelper(id, helper) {
@@ -238,23 +262,32 @@ export class StaffStore {
     if (!helper) this.ensureIdentity(id);
   }
 
-  // Gives a staff member a new random name and look (title and role stay).
+  // Gives a staff member a new random name and look (title and role stay). Both always differ from the current ones:
+  // another name, and another hair style and outfit.
   randomize(id) {
     const meta = this.readMeta();
     if (!meta[id] && !this.has(id)) return null;
+    const current = meta[id] || {};
     const others = { ...meta };
     delete others[id];
-    const person = randomPerson(this.takenNames(others));
-    meta[id] = { ...(meta[id] || {}), name: person.name, look: person.look };
+    const taken = [...this.takenNames(others), ...(current.name ? [current.name] : [])];
+    const old = current.look || {};
+    let person = randomPerson(taken);
+    for (let i = 0; i < 50 && (person.look.hairStyle === old.hairStyle || person.look.outfit === old.outfit); i++) {
+      person = randomPerson(taken);
+    }
+    meta[id] = { ...current, name: person.name, look: person.look };
     this.writeMeta(meta);
     return this.get(id);
   }
 
   // Gives a staff member another desk: the dashboard draws the desk and what is on it from this number.
-  randomizeDesk(id) {
+  // The dashboard may pick the number itself, so the new desk surely looks different from the current one.
+  randomizeDesk(id, seed) {
     const meta = this.readMeta();
     if (!meta[id] && !this.has(id)) return null;
-    meta[id] = { ...(meta[id] || {}), deskSeed: 1 + Math.floor(Math.random() * 1e9) };
+    const valid = Number.isInteger(seed) && seed > 0 && seed <= 1e9 && seed !== meta[id]?.deskSeed;
+    meta[id] = { ...(meta[id] || {}), deskSeed: valid ? seed : 1 + Math.floor(Math.random() * 1e9) };
     this.writeMeta(meta);
     return this.get(id);
   }

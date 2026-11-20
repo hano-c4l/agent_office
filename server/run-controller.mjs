@@ -26,6 +26,11 @@ const UNKNOWN_RESET_RETRY_MS = 30 * 60 * 1000;
 // cover six hours: longer than a whole 5-hour window, even when the limit was hit right at its start.
 const MAX_RESUME_ATTEMPTS = 12;
 const MAX_TIMER_MS = 2 ** 31 - 1;
+// A turn cut off by a server stop (or a crash, or the computer shutting down) continues in the same session.
+export const RESTART_PROMPT = "The office server restarted while you were working, so your last turn was cut off. " +
+  "Check the state (git status, .office/tasks.json) and continue the work where you stopped. Do not redo finished tasks.";
+const RESTART_RESUME_DELAY_MS = 20 * 1000;
+export const INTERRUPTED_ERROR = "The office server stopped during this turn.";
 const LIMIT_TEXT = /usage limit|hit your limit|limit reached|limit will reset|rate[ _-]?limit/i;
 
 function readJson(file, fallback) {
@@ -75,6 +80,16 @@ function findResetsAt(value, depth = 0) {
     if (found) return found;
   }
   return null;
+}
+
+// A message waiting for the PM: text is what the PM gets, note what the customer sees (null for the office's own).
+function queueItem(value) {
+  const item = typeof value === "string" ? { text: value, note: value } : value;
+  if (!item || typeof item.text !== "string" || !item.text.trim()) return null;
+  return {
+    id: item.id || randomUUID(), text: item.text, note: typeof item.note === "string" ? item.note : null,
+    at: item.at || new Date().toISOString(),
+  };
 }
 
 export function runnerConfig() {
@@ -143,34 +158,82 @@ export class RunController {
     this.queue = [];
     this.reloadRequested = false;
     this.autoReloads = 0;
+    this.activeTurn = null;
+    this.pendingPrompt = null;
+    this.shuttingDown = false;
     const saved = readJson(this.stateFile, {});
+    // Messages waiting for the PM survive a restart (older versions saved plain strings).
+    this.queue = (Array.isArray(saved.queue) ? saved.queue : []).map((q) => queueItem(q)).filter(Boolean);
+    // A turn still marked active was cut off: the server stopped (or crashed) while the PM worked.
+    const cutOff = Boolean(saved.activeTurn && saved.sessionId);
     // A process cannot survive a server restart, so the saved state is never busy.
     this.state = {
       sessionId: saved.sessionId || null,
       origin: saved.origin || null,
       busy: false,
       waitingSlot: false,
-      lastError: saved.lastError || null,
+      lastError: cutOff ? INTERRUPTED_ERROR : saved.lastError || null,
       costUsd: saved.costUsd || 0,
       limit: saved.limit || null,
       resumeAt: saved.resumeAt || null,
+      resumeReason: saved.resumeReason || "limit",
       resumeAttempts: saved.resumeAttempts || 0,
+      interrupted: cutOff ? { startedAt: saved.activeTurn.startedAt || null } : saved.interrupted || null,
     };
     // A resume planned before the server stopped still happens (soon after the start when its time has passed).
     if (this.state.resumeAt && this.state.sessionId) this.armResume();
     else this.state.resumeAt = null;
+    if (cutOff || (this.queue.length && this.state.sessionId && !this.state.resumeAt)) this.afterRestart(cutOff);
   }
 
+  // Work that was going on when the server stopped: continue it (auto continue on) or tell the customer how.
+  afterRestart(cutOff) {
+    const waiting = this.queue.filter((q) => q.note).length;
+    const queued = waiting ? ` ${waiting} queued message(s) follow after that.` : "";
+    if (this.state.resumeAt) {
+      this.recordSystem(`The office server stopped during the PM's turn. The PM continues at ${new Date(this.state.resumeAt).toLocaleString()} as planned.${queued}`);
+    } else if (this.state.origin === "dashboard" && this.getSettings().autoResume) {
+      this.state.resumeAt = Date.now() + RESTART_RESUME_DELAY_MS;
+      this.state.resumeReason = "restart";
+      this.armResume();
+      this.recordSystem(`The office server stopped during the PM's turn. Auto continue is on: the PM continues in a moment.${queued}`, false);
+    } else {
+      this.recordSystem((cutOff ? "The office server stopped during the PM's turn. " : "") +
+        "Send a message (for example \"continue\") and the PM continues where it stopped; nothing is started again by itself." +
+        queued);
+    }
+    this.save();
+  }
+
+  // queue: the customer's messages waiting for the PM (internal instructions are not listed).
   publicState() {
-    return { ...this.state, queued: this.queue.length };
+    const visible = this.queue.filter((q) => q.note).map(({ id, note, at }) => ({ id, text: note, at }));
+    return { ...this.state, queued: visible.length, queue: visible, canSupplement: this.canSupplement() };
+  }
+
+  // A message sent while the PM works can join the running turn (like typing in Claude Code mid-turn).
+  canSupplement() {
+    return Boolean(this.child && this.inputOpen && this.state.origin === "dashboard");
+  }
+
+  // Removes a message that is still waiting in the queue.
+  removeQueued(id) {
+    const before = this.queue.length;
+    this.queue = this.queue.filter((q) => q.id !== id || !q.note);
+    if (this.queue.length === before) return false;
+    this.save();
+    return true;
   }
 
   save() {
-    const { sessionId, origin, lastError, costUsd, limit, resumeAt, resumeAttempts } = this.state;
+    const { sessionId, origin, lastError, costUsd, limit, resumeAt, resumeReason, resumeAttempts, interrupted } = this.state;
     try {
       fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
-      fs.writeFileSync(this.stateFile,
-        JSON.stringify({ sessionId, origin, lastError, costUsd, limit, resumeAt, resumeAttempts }, null, 2) + "\n");
+      fs.writeFileSync(this.stateFile, JSON.stringify({
+        sessionId, origin, lastError, costUsd, limit, resumeAt, resumeReason, resumeAttempts, interrupted,
+        // The turn running now (cleared when it ends) and the messages waiting for the PM.
+        activeTurn: this.activeTurn, queue: this.queue,
+      }, null, 2) + "\n");
     } catch (err) {
       console.warn(`Could not save runner state for ${this.department.id}: ${err.message}`);
     }
@@ -187,6 +250,7 @@ export class RunController {
 
   // note: what the message history shows for this message (the text itself by default, null for nothing).
   start(request, { plain = false, note } = {}) {
+    if (this.shuttingDown) throw new Error("The computer is shutting down. Cancel the shutdown first.");
     if (this.state.busy) throw new Error("The PM is busy. Stop the current turn first.");
     const text = String(request || "").trim();
     if (!text) throw new Error("Request is empty.");
@@ -211,9 +275,12 @@ export class RunController {
     return this.record({ kind: "system", notice, text });
   }
 
-  reply(message, { takeover = false, note } = {}) {
+  // mode: "supplement" adds the message to the PM's running turn when it can, "queue" (the default, used by the
+  // office's own instructions) waits until the turn ends.
+  reply(message, { takeover = false, note, mode = "queue" } = {}) {
     const text = String(message || "").trim();
     if (!text) throw new Error("Message is empty.");
+    if (this.shuttingDown) throw new Error("The computer is shutting down. Cancel the shutdown first.");
     if (!this.state.sessionId) throw new Error("No run to reply to. Send a request first.");
     if (this.state.origin === "chat" && !takeover) {
       const err = new Error("This run belongs to a chat session. Take it over first, or reply in Claude.");
@@ -223,14 +290,36 @@ export class RunController {
     if (takeover) this.state.origin = "dashboard";
     // A message from the customer takes the place of a planned automatic resume.
     if (note !== null) this.cancelResume();
-    const recorded = this.recordCustomer(note === undefined ? text : note);
-    if (this.state.busy) {
-      this.queue.push(text);
-      this.save();
-      return { queued: true, message: recorded };
+    const shown = note === undefined ? text : note;
+    if (this.state.busy && mode === "supplement" && this.canSupplement()) {
+      this.writeInput(text, "next");
+      const message = shown ? this.record({ kind: "msg", from: "customer", to: "pm", text: shown, supplement: true }) : null;
+      return { queued: false, supplemented: true, message };
     }
+    if (this.state.busy) {
+      // Recorded when it is sent, so a message removed from the queue never shows as sent.
+      this.queue.push(queueItem({ text, note: shown || null }));
+      this.save();
+      return { queued: true };
+    }
+    const recorded = this.recordCustomer(shown);
     this.spawnTurn(text, { newSession: false });
     return { queued: false, message: recorded };
+  }
+
+  // Sends a user message to the running Claude process (stream-json input).
+  writeInput(text, priority) {
+    const line = { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null };
+    if (priority) line.priority = priority;
+    this.child.stdin.write(JSON.stringify(line) + "\n");
+  }
+
+  // No more input: the process ends after the turn (and any supplements it already took in).
+  closeInput() {
+    if (!this.inputOpen) return;
+    this.inputOpen = false;
+    try { this.child?.stdin.end(); } catch { /* the process is gone */ }
+    this.broadcast("runner", this.publicState());
   }
 
   stop() {
@@ -247,9 +336,44 @@ export class RunController {
     }
   }
 
+  // The server is stopping: keep what is going on so the next start can continue it.
+  shutdown() {
+    this.shuttingDown = true;
+    clearTimeout(this.resumeTimer);
+    if (!this.child && this.state.waitingSlot) {
+      // A turn waiting for a run slot never started: its prompt goes back to the front of the queue.
+      this.scheduler.cancel(this);
+      if (this.pendingPrompt) this.queue.unshift(queueItem({ text: this.pendingPrompt, note: null }));
+    }
+    this.save();
+    if (this.child) this.child.kill();
+  }
+
+  // A computer shutdown was cancelled: the server keeps running, so pick the work up as after a restart.
+  cancelShutdown() {
+    if (!this.shuttingDown) return;
+    this.shuttingDown = false;
+    const cutOff = Boolean(this.activeTurn);
+    const hadSlot = this.state.busy && !this.state.waitingSlot;
+    this.activeTurn = null;
+    this.child = null;
+    this.state.busy = false;
+    this.state.waitingSlot = false;
+    if (hadSlot) this.scheduler.release(this);
+    if (cutOff) {
+      this.state.lastError = INTERRUPTED_ERROR;
+      this.state.interrupted = { startedAt: null };
+    }
+    if (this.state.resumeAt) this.armResume();
+    if (cutOff || (this.queue.length && this.state.sessionId && !this.state.resumeAt)) this.afterRestart(cutOff);
+    else this.save();
+  }
+
   spawnTurn(prompt, { newSession }) {
     this.state.busy = true;
     this.state.lastError = null;
+    this.state.interrupted = null;
+    this.pendingPrompt = prompt;
     this.resultError = null;
     const started = this.scheduler.acquire(this, () => {
       this.state.waitingSlot = false;
@@ -264,9 +388,11 @@ export class RunController {
 
   launch(prompt, { newSession }) {
     const cfg = runnerConfig();
+    // Streaming input keeps stdin open during the turn, so the customer can add to it (see reply, "supplement").
     const args = [
-      "-p", prompt,
+      "-p",
       newSession ? "--session-id" : "--resume", this.state.sessionId,
+      "--input-format", "stream-json",
       "--output-format", "stream-json", "--verbose",
       "--permission-mode", cfg.permissionMode,
       "--permission-prompts", "none",
@@ -280,6 +406,7 @@ export class RunController {
     if (cfg.disallowedTools.length) args.push("--disallowedTools", ...cfg.disallowedTools);
 
     this.agentsAtStart = this.agentSignature();
+    this.activeTurn = { startedAt: new Date().toISOString() };
     this.save();
     this.broadcast("pm-turn", { status: "started", prompt });
 
@@ -291,7 +418,10 @@ export class RunController {
       return;
     }
     this.child = child;
-    child.stdin.end();
+    this.inputOpen = true;
+    child.stdin.on("error", () => { this.inputOpen = false; });
+    this.writeInput(prompt);
+    this.broadcast("runner", this.publicState());
 
     let buffer = "";
     let stderr = "";
@@ -308,7 +438,12 @@ export class RunController {
       buffer += chunk;
       const lines = buffer.split("\n");
       buffer = lines.pop();
-      lines.forEach((line) => { if (this.handleLine(line)) gotResult = true; });
+      lines.forEach((line) => {
+        if (!this.handleLine(line)) return;
+        gotResult = true;
+        // The turn is over unless supplements it took in still wait for their own turn.
+        if (!(this.queuedTurns > 0)) this.closeInput();
+      });
     });
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-MAX_STDERR); });
@@ -344,6 +479,7 @@ export class RunController {
     }
     if (msg.type === "result") {
       if (typeof msg.total_cost_usd === "number") this.state.costUsd += msg.total_cost_usd;
+      this.queuedTurns = Number(msg.queued_turn_count) || 0;
       if (msg.is_error) this.resultError = String(msg.result || msg.subtype || "Unknown error");
       const result = String(msg.result || "");
       if (msg.is_error && LIMIT_TEXT.test(result)) this.noteLimit(parseResetTime(result));
@@ -385,6 +521,7 @@ export class RunController {
     // Without a known reset time (or when it has passed but the limit is still there), try again later.
     const base = limit.resetsAt && limit.resetsAt > now ? limit.resetsAt : now + UNKNOWN_RESET_RETRY_MS;
     this.state.resumeAt = base + RESUME_MARGIN_MS;
+    this.state.resumeReason = "limit";
     this.armResume();
     return true;
   }
@@ -407,8 +544,10 @@ export class RunController {
       return false;
     }
     this.state.resumeAttempts += 1;
-    this.recordSystem("The usage limit has reset: the PM continues automatically.", false);
-    this.spawnTurn(RESUME_PROMPT, { newSession: false });
+    const restart = this.state.resumeReason === "restart";
+    this.state.resumeReason = "limit";
+    this.recordSystem(restart ? "The PM continues the turn the server stop cut off." : "The usage limit has reset: the PM continues automatically.", false);
+    this.spawnTurn(restart ? RESTART_PROMPT : RESUME_PROMPT, { newSession: false });
     return true;
   }
 
@@ -425,6 +564,13 @@ export class RunController {
   }
 
   finish(processError) {
+    this.inputOpen = false;
+    // Stopping the server: the saved state already says this turn was cut off, so leave it as it is.
+    if (this.shuttingDown) {
+      this.child = null;
+      return;
+    }
+    this.activeTurn = null;
     const error = processError || this.resultError || null;
     const limit = error && this.limitHit ? { ...this.limitHit, at: Date.now() } : null;
     this.limitHit = null;
@@ -450,7 +596,7 @@ export class RunController {
     const agentsChanged = this.reloadRequested && this.agentSignature() !== this.agentsAtStart;
     if (!error && agentsChanged && !this.queue.length && this.autoReloads < MAX_AUTO_RELOADS) {
       this.autoReloads += 1;
-      this.queue.push("The new agent files are loaded now. Continue.");
+      this.queue.push(queueItem({ text: "The new agent files are loaded now. Continue.", note: null }));
     } else if (!this.reloadRequested) {
       this.autoReloads = 0;
     } else if (!agentsChanged) {
@@ -459,9 +605,10 @@ export class RunController {
     }
     this.reloadRequested = false;
     const next = !error && this.queue.length ? this.queue.shift() : null;
+    if (next?.note) this.recordCustomer(next.note);
     // Messages queued before a usage limit wait for the automatic resume.
     if (error && !resuming) this.queue = [];
     this.scheduler.release(this);
-    if (next) this.spawnTurn(next, { newSession: false });
+    if (next) this.spawnTurn(next.text, { newSession: false });
   }
 }

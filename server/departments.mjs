@@ -152,6 +152,7 @@ export class Department {
     const message = {
       id: randomUUID(), ts: new Date().toISOString(), kind: entry.kind === "system" ? "system" : "msg",
       from: entry.from, to: entry.to, notice: Boolean(entry.notice), text,
+      ...(entry.supplement ? { supplement: true } : {}),
     };
     try {
       fs.mkdirSync(this.office, { recursive: true });
@@ -377,8 +378,10 @@ export class Department {
   }
 
   // A new random room look; the dashboard derives layout, furniture and colors from the seed.
-  randomizeRoom() {
-    this.info.roomSeed = Math.floor(Math.random() * 1e9);
+  // The dashboard may pick the seed itself, so the new room surely looks different from the current one.
+  randomizeRoom(seed) {
+    const valid = Number.isInteger(seed) && seed >= 0 && seed < 1e9 && seed !== this.info.roomSeed;
+    this.info.roomSeed = valid ? seed : Math.floor(Math.random() * 1e9);
     // A new room starts without the single items the customer had swapped in the old one.
     delete this.info.roomItems;
     try { writeDepartmentFile(this.root, this.info); } catch { /* the workspace may be missing */ }
@@ -525,7 +528,8 @@ export class Company {
       const store = new StaffStore(workspace);
       existingAgents.forEach((id) => {
         if (id === "pm") return;
-        if (staffAgents.has(id)) store.ensureIdentity(id);
+        // setHelper(false) also takes an office tool (installed as an assistant) on as staff when it was ticked.
+        if (staffAgents.has(id)) store.setHelper(id, false);
         else store.setHelper(id, true);
       });
       if (requested.length && !docFolders.length) setup.warnings.push(`No documentation folder found (${requested.join(", ")}): the analyst reads the code.`);

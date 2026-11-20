@@ -27,7 +27,11 @@ decoration).
 | Remote access | Extra host names in `office/server.json` (`office.hanowl.com`) behind Cloudflare Tunnel and Access; unbuffered live stream with pings, reconnect after 40 s of silence |
 | Runner | Claude CLI in print mode, allowed and blocked tools in `office/runner.json`, up to two PM runs in parallel, runs stop with the server |
 | Local API safety | Bound to 127.0.0.1; refuses requests from other sites and rebound host names; writes need JSON |
-| Tests | `npm test`: 21 server tests (also message history, settings, usage limit detection and resume) (request guard, agent files, staff store and desks, room items, scheduler, new workspace, office update, release, migration) |
+| Office tools | `search`, `grep` and `docs` (read-only Haiku subagents) installed in every department as assistants (`office_<name>` when the project has its own agent of that name), with a "Subagents" rule in the CLAUDE.md section |
+| Supplement and queue | While the office works a message joins the running turn (Supplement) or waits (Queue); queued messages can be removed |
+| Restarts | A turn cut off by a server stop is saved and continued in the same session (auto continue on) or after a message; queued messages survive |
+| Shutdown | ⏻ Shutdown in the top bar: stops PM turns, shuts the computer down after one minute, can be cancelled |
+| Tests | `npm test`: 29 server tests (request guard, supplements and the queue, office tool names, random picks, agent files, staff store and desks, room items, message history, settings, usage limits, restarts, shutdown command, scheduler, new workspace with office tools, office update, release, migration) |
 
 ## Tested with real runs
 
@@ -90,6 +94,29 @@ narrow screens, and the scenes at the new places (band, nap pods, treadmill, mas
 Not checked: a real usage limit (the parsing follows the `rate_limit_event` and error shapes of Claude CLI 2.1.322 and
 is covered by tests with sample lines), and the dashboard through the real tunnel (Cloudflare Access needs a sign-in).
 
+## Checked for the office tools, restart and shutdown update of 2026-11-20 (no PM runs)
+
+| Check | Result |
+|---|---|
+| `npm test` | 25 of 25 pass |
+| Shutdown in the browser (dry run, port 5179) | Confirm, banner with countdown (also after a reload), Cancel shutdown; the server logged `shutdown /s /t 60 ...` and `shutdown /a` |
+| Narrow screen | Top bar with ⏻ Shutdown, no horizontal scroll at 375 px |
+
+Not checked: a real shutdown, a real cut-off turn continuing after a restart (covered by tests with a stub), and the
+office tools in a real PM run.
+
+## Checked for the supplement, queue and random update of 2026-11-20 (no PM runs)
+
+| Check | Result |
+|---|---|
+| `npm test` | 29 of 29 pass |
+| Claude CLI 2.1.322, streaming input (haiku, scratch folder) | A message sent with `priority: "next"` 5 s into a turn joined it: one result with both answers |
+| Browser (port 5179, state injected in the page) | "Office working… (2 queued)", Supplement and Queue switch the button and hint, queue with ✕ Remove, To do collapsed to 5 with "Show 5 more"; no horizontal scroll at 375 px |
+| Random pickers | 200 rolls each: the desk shape, the PM's executive desk and the room layout never stayed the same |
+| Usage limit text | The live server showed "You've hit your 5-hour limit · resets 1:30pm (Asia/Ho_Chi_Minh)", the form the parser reads |
+
+Not checked: a supplement and a queue removal in a real PM run (the runner is covered by tests with a stand-in process).
+
 ## Fixed in that review
 
 - `templates/workspace/CLAUDE.md` was not in git (the `workspace/` ignore rule also matched `templates/workspace/`),
@@ -101,6 +128,11 @@ is covered by tests with sample lines), and the dashboard through the real tunne
 - A folder with an unreadable entry broke the folder picker; a malformed URL answered 500 instead of 400.
 
 ## Known limits
+
+- **A cut-off turn loses its unfinished step**: edits already written stay in the workspace, but a tool call or
+  subagent that was running when the server stopped is not finished; the PM checks git and the task board and goes on.
+- **Closing the terminal window** ends the server without its shutdown handler; the turn is still detected as cut off
+  at the next start, but its Claude process may keep running a moment longer on its own.
 
 - **Message history starts with this update**: older departments show the hook copies of their messages (the PM's
   replies there are clipped) until new messages are saved.
