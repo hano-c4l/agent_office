@@ -76,7 +76,16 @@ function applySnapshot(d, snap) {
   d.run = snap.run;
   d.runner = snap.runner || {};
   d.proposalRaw = snap.proposal;
-  (snap.events || []).forEach((ev) => applyEvent(d, ev, true));
+  d.messageIds = new Set();
+  // Hook events and the saved message history (customer, PM replies, notices) are replayed in time order.
+  const timeline = [
+    ...(snap.events || []).map((ev) => ({ ts: ev.ts || "", ev })),
+    ...(snap.messages || []).map((m) => ({ ts: m.ts || "", m })),
+  ].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  // A department from before the saved history shows the hook copies of its dashboard messages instead.
+  d.hookHistory = !(snap.messages || []).length;
+  timeline.forEach((item) => (item.ev ? applyEvent(d, item.ev, true) : addMessage(d, item.m)));
+  d.hookHistory = false;
   // Statuses replayed from an old run should not stay "working".
   if (!d.runner.busy) d.agents.forEach((a) => { a.status = "idle"; a.bubble = null; });
 }
@@ -104,6 +113,17 @@ function addAction(agent, text, time = fmtTime()) {
   if (!agent || !agent.actions || !text) return;
   agent.actions.unshift({ time, text });
   agent.actions.length = Math.min(agent.actions.length, 30);
+}
+
+// A message kept by the server (it arrives on the stream and in the answer to a request, so it is added once).
+function addMessage(d, m) {
+  if (!d || !m || !m.id) return;
+  d.messageIds = d.messageIds || new Set();
+  if (d.messageIds.has(m.id)) return;
+  d.messageIds.add(m.id);
+  const time = m.ts ? fmtTime(new Date(m.ts)) : fmtTime();
+  if (m.kind === "system") pushFeed(d, { kind: "system", notice: Boolean(m.notice), text: m.text, time });
+  else pushFeed(d, { kind: "msg", from: m.from || "pm", to: m.to || "customer", text: m.text, time });
 }
 
 function pushFeed(d, item) {
@@ -162,6 +182,10 @@ function deptStatus(d) {
   if (needsYou(d)) return { key: "waiting", label: "Needs you" };
   if (r.waitingSlot) return { key: "queued", label: "Queued" };
   if (r.busy) return { key: "working", label: "Working" };
+  if (r.resumeAt) {
+    return { key: "queued", label: `Usage limit, continues ${new Date(r.resumeAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` };
+  }
+  if (r.limit && r.lastError) return { key: "error", label: "Usage limit" };
   if (r.lastError) return { key: "error", label: "Error" };
   if (d.run && d.run.status === "done") return { key: "done", label: "Delivered" };
   if (!r.sessionId && !d.tasks.length) return { key: "idle", label: "Waiting for a request" };
@@ -215,7 +239,7 @@ function setStatus(agent, status) {
 }
 
 function fromDashboardRunner(d, ev) {
-  return d.runner && ev.session === d.runner.sessionId && d.runner.origin === "dashboard";
+  return !d.hookHistory && d.runner && ev.session === d.runner.sessionId && d.runner.origin === "dashboard";
 }
 
 function applyEvent(d, ev, replay = false) {
@@ -229,6 +253,8 @@ function applyEvent(d, ev, replay = false) {
       d.liveWaiting = null;
       // Messages sent from the dashboard are already in the feed (added when sent).
       if (fromDashboardRunner(d, ev)) break;
+      // Background task notices from the CLI arrive as prompts too; they are not the customer's words.
+      if (/^\s*<task-notification>/.test(ev.text || "")) break;
       setStatus(findAgent(d, "pm"), "thinking");
       pushFeed(d, { kind: "msg", from: "customer", to: "pm", text: ev.text, time });
       break;
@@ -398,6 +424,7 @@ function renderAll() {
   if (state.view) renderRoomView();
   else renderFloor();
   renderPanel();
+  renderSettings();
 }
 
 function renderTopbar() {
@@ -1123,7 +1150,7 @@ async function submitHireAuto() {
   $("#hireAutoBtn").disabled = true;
   try {
     const res = await api("POST", `/api/departments/${encodeURIComponent(d.id)}/hire`, { description, model: fd.get("model") });
-    pushFeed(d, { kind: "msg", from: "customer", to: "pm", text: `Hire request: ${description}` });
+    addMessage(d, res.message);
     pushFeed(d, { kind: "system", notice: true, text: res.queued
       ? `${pmName(d)} is busy; the hire request is queued. You will get a hire proposal to approve.`
       : `${pmName(d)} is designing the new role. You will get a hire proposal to approve.` });
@@ -1343,18 +1370,79 @@ async function sendLiveMessage() {
   const base = `/api/departments/${encodeURIComponent(d.id)}/run`;
   try {
     if (mode === "new") {
-      await api("POST", `${base}/start`, { request: text });
+      const res = await api("POST", `${base}/start`, { request: text });
       d.run = { status: "running", request: text };
+      addMessage(d, res.message);
     } else {
       const res = await api("POST", `${base}/reply`, { text, takeover: mode === "takeover" });
+      addMessage(d, res.message);
       if (res.queued) pushFeed(d, { kind: "system", notice: true, text: `${pmName(d)} is busy. Your message is queued.` });
     }
-    pushFeed(d, { kind: "msg", from: "customer", to: "pm", text });
     input.value = "";
   } catch (err) {
     pushFeed(d, { kind: "system", notice: true, text: `Could not send: ${err.message}` });
   }
   renderAll();
+}
+
+// ---------- department settings ----------
+
+function deptSettings(d) {
+  return { autoResume: false, ...((d && d.info && d.info.settings) || {}) };
+}
+
+function renderSettings() {
+  const d = cur();
+  if (!d || $("#settingsModal").hidden) return;
+  const settings = deptSettings(d);
+  const r = d.runner || {};
+  $("#settingsHelp").textContent = d.info.name;
+  $("#autoResume").checked = settings.autoResume;
+  $("#autoResume").disabled = state.demo;
+  $("#autoResumeState").textContent = settings.autoResume ? "ON" : "OFF";
+  const when = (ms) => new Date(ms).toLocaleString();
+  let status = "";
+  if (r.resumeAt) status = `The PM continues automatically at ${when(r.resumeAt)}.`;
+  else if (r.limit && r.lastError) {
+    status = `The PM stopped on a usage limit${r.limit.resetsAt ? ` (resets ${when(r.limit.resetsAt)})` : ""}.` +
+      (settings.autoResume ? "" : " Turn this on to continue automatically.");
+  }
+  $("#settingsStatus").hidden = !status;
+  $("#settingsStatus").textContent = status;
+}
+
+function openSettings() {
+  if (!cur()) return;
+  $("#settingsError").hidden = true;
+  $("#settingsModal").hidden = false;
+  renderSettings();
+  $("#autoResume").focus();
+}
+
+function closeSettings() {
+  $("#settingsModal").hidden = true;
+}
+
+async function saveSetting(name, value) {
+  const d = cur();
+  if (!d) return;
+  $("#settingsError").hidden = true;
+  if (state.demo) {
+    d.info.settings = { ...deptSettings(d), [name]: value };
+    return renderSettings();
+  }
+  $("#autoResume").disabled = true;
+  try {
+    const res = await api("PUT", `/api/departments/${encodeURIComponent(d.id)}/settings`, { [name]: value });
+    d.info.settings = res.settings;
+    if (res.runner) d.runner = res.runner;
+  } catch (err) {
+    $("#settingsError").textContent = `Could not save: ${err.message}`;
+    $("#settingsError").hidden = false;
+  }
+  $("#autoResume").disabled = false;
+  renderAll();
+  renderSettings();
 }
 
 async function releaseDept() {
@@ -1606,8 +1694,7 @@ async function submitCreate() {
     if (!state.depts.has(snap.info.id)) state.depts.set(snap.info.id, makeDept(snap));
     const d = state.depts.get(snap.info.id);
     (snap.info.setup?.log || []).forEach((line) => pushFeed(d, { kind: "system", text: line }));
-    const request = String(body.request || "").trim();
-    if (request && mode !== "open") pushFeed(d, { kind: "msg", from: "customer", to: "pm", text: request });
+    (snap.messages || []).forEach((m) => addMessage(d, m));
     if (mode === "migrate") pushFeed(d, { kind: "system", notice: true, text: `${pmName(d)} is onboarding the project: reading the code before proposing a team.` });
     closeCreate();
     openDept(snap.info.id);
@@ -1712,6 +1799,8 @@ function bindEvents() {
     if (t.closest("#createCancel") || t.closest("#createClose")) return closeCreate();
     if (t.closest("#backBtn")) return backToFloor();
     if (t.closest("#hireBtn")) return openHire();
+    if (t.closest("#settingsBtn")) return openSettings();
+    if (t.closest("#settingsClose") || t.closest("#settingsCancel")) return closeSettings();
     const hireMode = t.closest("[data-hire-mode]");
     if (hireMode) return setHireMode(hireMode.dataset.hireMode);
     if (t.closest("#hireClose") || t.closest("[data-hire-cancel]")) return closeHire();
@@ -1788,6 +1877,7 @@ function bindEvents() {
   });
 
   document.addEventListener("change", (e) => {
+    if (e.target.id === "autoResume") return saveSetting("autoResume", e.target.checked);
     if (e.target.id === "taskOwner") {
       state.board.owner = e.target.value;
       return renderBoard(cur());
@@ -1854,6 +1944,7 @@ function bindEvents() {
     if (e.key === "Escape") {
       if (!$("#folderModal").hidden) return closePicker();
       if (!$("#hireModal").hidden) return closeHire();
+      if (!$("#settingsModal").hidden) return closeSettings();
       if (!$("#createModal").hidden) return closeCreate();
       if (state.proposal) { state.proposalDismissed.add(state.proposal.key); return closeProposalModal(); }
       if (state.selectedId || state.selectedItem) return closePanel();
@@ -1877,13 +1968,48 @@ function deptFromMessage(msg) {
   return state.depts.get(msg.dept);
 }
 
+// The dashboard opened on this machine falls back to demo mode without a server; opened through a tunnel
+// (another host name) it keeps trying, because the server is there but the connection dropped.
+const isLocalPage = () => ["localhost", "127.0.0.1", "[::1]", ""].includes(location.hostname) || location.hostname.endsWith(".localhost");
+const STREAM_SILENCE_MS = 40000;
+let liveSource = null;
+let everConnected = false;
+let reconnectTimer = null;
+let silenceTimer = null;
+
+function setOffline(offline) {
+  const badge = $("#offlineBadge");
+  if (badge) badge.hidden = !offline || state.demo;
+}
+
+// Reopens the stream; its snapshot rebuilds every department, history included, so nothing is missed.
+function reconnectLive(delay = 3000) {
+  clearTimeout(reconnectTimer);
+  if (liveSource) { liveSource.close(); liveSource = null; }
+  setOffline(true);
+  reconnectTimer = setTimeout(connectLive, delay);
+}
+
+// A proxy can keep a stream open while holding its data back: the server pings every 15 seconds.
+function heardFromServer() {
+  clearTimeout(silenceTimer);
+  silenceTimer = setTimeout(() => reconnectLive(0), STREAM_SILENCE_MS);
+}
+
 function connectLive() {
   if (typeof EventSource === "undefined") return startDemo();
+  if (state.demo) return;
   const source = new EventSource("/api/stream");
+  liveSource = source;
   let opened = false;
+  heardFromServer();
+  source.addEventListener("ping", () => heardFromServer());
 
   source.addEventListener("snapshot", (e) => {
     opened = true;
+    everConnected = true;
+    heardFromServer();
+    setOffline(false);
     const data = JSON.parse(e.data);
     state.live = true;
     state.demo = false;
@@ -1899,6 +2025,7 @@ function connectLive() {
   });
 
   const on = (type, handler) => source.addEventListener(type, (e) => {
+    heardFromServer();
     const msg = JSON.parse(e.data);
     const d = deptFromMessage(msg);
     if (!d && type !== "department") return;
@@ -1930,18 +2057,15 @@ function connectLive() {
   on("pm-turn", (d, data) => {
     const pm = findAgent(d, "pm");
     if (data.status === "started") setStatus(pm, "thinking");
-    if (data.status === "note") pushFeed(d, { kind: "system", text: data.text });
     if (data.status === "waiting") pushFeed(d, { kind: "system", text: `Queued: ${pmName(d)} starts as soon as another department finishes.` });
     if (data.status === "ended") {
       // The PM's turn is over, so nobody in this department is still working.
       d.agents.forEach((a) => { if (a.status !== "waiting") a.status = "idle"; });
-      if (data.error) pushFeed(d, { kind: "system", notice: true, text: `${pmName(d)} stopped: ${data.error.slice(0, 300)}` });
     }
   });
   on("pm-text", (d, data) => showBubble(d, findAgent(d, "pm"), data.text, false));
-  on("pm-reply", (d, data) => {
-    if (data.text && !data.isError) pushFeed(d, { kind: "msg", from: "pm", to: "customer", text: data.text });
-  });
+  // PM replies, the customer's messages and notices come from the saved history.
+  on("message", (d, m) => addMessage(d, m));
   source.addEventListener("department-removed", (e) => {
     const msg = JSON.parse(e.data);
     state.depts.delete(msg.dept);
@@ -1950,11 +2074,15 @@ function connectLive() {
   });
 
   source.onerror = () => {
-    // Without the office server the stream fails right away: fall back to demo mode.
-    if (!opened) {
+    // Without the office server the stream fails right away: fall back to demo mode (on this machine only).
+    if (!opened && !everConnected && isLocalPage()) {
       source.close();
-      startDemo();
+      clearTimeout(silenceTimer);
+      return startDemo();
     }
+    // The browser retries an open stream by itself; a refused one (for example an expired sign-in) is closed.
+    setOffline(true);
+    if (source.readyState === EventSource.CLOSED) reconnectLive(5000);
   };
 }
 

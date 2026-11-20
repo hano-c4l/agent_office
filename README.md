@@ -146,7 +146,14 @@ are installed). The dashboard shows that run too and can take it over (**Take ov
 - The line under the room counts who is doing what. Scenes stop when your system asks for reduced motion.
 - **Client desk**: send a request or reply to the PM. **Messages** holds what you read or answer (your messages, the
   PM's replies, approvals, errors) with "Needs your reply" on the PM's open question; **Activity** holds the team's
-  work (tools, delegation, reports).
+  work (tools, delegation, reports). The messages are saved in the workspace (`.office/messages.jsonl`), so they are
+  still there after the server restarts.
+- **⚙ Settings** (room header): options per department.
+  - **Auto continue after the usage limit resets** (default OFF): when the PM stops on a usage limit such as the 5-hour
+    limit, the server reads the reset time from the Claude CLI, waits until a minute after it and tells the PM to
+    continue in the same session. Messages you sent meanwhile follow. The planned time survives a server restart, a
+    message from you or **Stop** replaces it, and without a known reset time it tries again every 30 minutes (12
+    tries, six hours, longer than a 5-hour window). The server must keep running; the room shows "Usage limit, continues HH:MM".
 - **Task board**: search, filter by owner, scrolling columns; Done shows the latest five until you expand it.
   Setup work by the PM (writing the PM profile, creating the team, writing skills) shows as `S` tasks.
 - **Release to main** merges `preview` into `main`; **Confirm migration** appears while a migrated project waits.
@@ -185,6 +192,11 @@ The server still listens on `127.0.0.1` only; a tunnel running on the same machi
 host name in `office/server.json` (`{"allowedHosts": ["office.hanowl.com"]}`) or set `ALLOWED_HOSTS` (comma separated), then
 restart the server. The API has no login of its own: keep **Cloudflare Access** in front of the host name, and never
 expose the port directly. Point the tunnel at `http://127.0.0.1:5178` and keep the original Host header (the default).
+
+The live stream (`/api/stream`) is sent uncompressed and unbuffered (`Cache-Control: no-transform`,
+`X-Accel-Buffering: no`) with a ping every 15 seconds. A dashboard that hears nothing for 40 seconds reconnects and
+reloads the whole state, history included, and shows **RECONNECTING…** meanwhile. Opened through the tunnel, the
+dashboard never falls back to demo mode; when the Cloudflare Access sign-in expires, reload the page to sign in again.
 
 ### Demo mode
 

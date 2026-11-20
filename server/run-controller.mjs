@@ -18,6 +18,15 @@ const MAX_STDERR = 4000;
 // The PM ends a turn with this marker after writing new agent files; the next turn loads them.
 const RELOAD_MARKER = "[[office:reload]]";
 const MAX_AUTO_RELOADS = 3;
+// Usage limits (for example the 5-hour limit): with auto continue on, the PM resumes the same session after the reset.
+export const RESUME_PROMPT = "The usage limit has reset. Continue the work where you stopped. If you were waiting for my answer, ask again.";
+const RESUME_MARGIN_MS = 60 * 1000;
+const UNKNOWN_RESET_RETRY_MS = 30 * 60 * 1000;
+// Tries in a row that hit the limit again. Without a known reset time it retries every 30 minutes, so 12 tries
+// cover six hours: longer than a whole 5-hour window, even when the limit was hit right at its start.
+const MAX_RESUME_ATTEMPTS = 12;
+const MAX_TIMER_MS = 2 ** 31 - 1;
+const LIMIT_TEXT = /usage limit|hit your limit|limit reached|limit will reset|rate[ _-]?limit/i;
 
 function readJson(file, fallback) {
   try {
@@ -32,6 +41,40 @@ function resolveClaudePath(configured) {
   const exe = process.platform === "win32" ? "claude.exe" : "claude";
   const local = path.join(os.homedir(), ".local", "bin", exe);
   return fs.existsSync(local) ? local : "claude";
+}
+
+// "...|1763660400" (older CLI) or "resets 3pm" / "resets 3:30pm" / "resets 15:00": the next reset time in ms, or null.
+// A time without a date is the next time the server's clock shows it.
+export function parseResetTime(text, now = Date.now()) {
+  const value = String(text || "");
+  const epoch = value.match(/\|(\d{10})\b/);
+  if (epoch) return Number(epoch[1]) * 1000;
+  const clock = value.match(/resets?\s+(?:at\s+)?(?:[A-Za-z]{3,9}\s+\d{1,2},?\s+(?:at\s+)?)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (!clock) return null;
+  let hour = Number(clock[1]);
+  const minute = Number(clock[2] || 0);
+  const half = (clock[3] || "").toLowerCase();
+  if (half === "pm" && hour < 12) hour += 12;
+  if (half === "am" && hour === 12) hour = 0;
+  if (hour > 23 || minute > 59) return null;
+  const at = new Date(now);
+  at.setHours(hour, minute, 0, 0);
+  if (at.getTime() <= now) at.setDate(at.getDate() + 1);
+  return at.getTime();
+}
+
+// Finds a reset time (epoch seconds or ms) anywhere in a stream-json message.
+function findResetsAt(value, depth = 0) {
+  if (!value || typeof value !== "object" || depth > 6) return null;
+  for (const [key, inner] of Object.entries(value)) {
+    if ((key === "resetsAt" || key === "resets_at") && Number(inner) > 0) {
+      const n = Number(inner);
+      return n < 1e12 ? n * 1000 : n;
+    }
+    const found = findResetsAt(inner, depth + 1);
+    if (found) return found;
+  }
+  return null;
 }
 
 export function runnerConfig() {
@@ -81,8 +124,16 @@ export class Scheduler {
 
 export class RunController {
   // department: { id, workspace }, getModel(): the PM model, broadcast(type, data)
-  constructor({ department, scheduler, getModel, agentSignature = () => "", broadcast }) {
+  // record(entry) keeps a message in the department history; getSettings() returns the department settings.
+  constructor({
+    department, scheduler, getModel, agentSignature = () => "", broadcast,
+    record = () => null, getSettings = () => ({}),
+  }) {
     this.department = department;
+    this.record = record;
+    this.getSettings = getSettings;
+    this.resumeTimer = null;
+    this.limitHit = null;
     this.scheduler = scheduler;
     this.getModel = getModel;
     this.agentSignature = agentSignature;
@@ -101,7 +152,13 @@ export class RunController {
       waitingSlot: false,
       lastError: saved.lastError || null,
       costUsd: saved.costUsd || 0,
+      limit: saved.limit || null,
+      resumeAt: saved.resumeAt || null,
+      resumeAttempts: saved.resumeAttempts || 0,
     };
+    // A resume planned before the server stopped still happens (soon after the start when its time has passed).
+    if (this.state.resumeAt && this.state.sessionId) this.armResume();
+    else this.state.resumeAt = null;
   }
 
   publicState() {
@@ -109,10 +166,11 @@ export class RunController {
   }
 
   save() {
-    const { sessionId, origin, lastError, costUsd } = this.state;
+    const { sessionId, origin, lastError, costUsd, limit, resumeAt, resumeAttempts } = this.state;
     try {
       fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
-      fs.writeFileSync(this.stateFile, JSON.stringify({ sessionId, origin, lastError, costUsd }, null, 2) + "\n");
+      fs.writeFileSync(this.stateFile,
+        JSON.stringify({ sessionId, origin, lastError, costUsd, limit, resumeAt, resumeAttempts }, null, 2) + "\n");
     } catch (err) {
       console.warn(`Could not save runner state for ${this.department.id}: ${err.message}`);
     }
@@ -127,19 +185,33 @@ export class RunController {
     this.save();
   }
 
-  start(request, { plain = false } = {}) {
+  // note: what the message history shows for this message (the text itself by default, null for nothing).
+  start(request, { plain = false, note } = {}) {
     if (this.state.busy) throw new Error("The PM is busy. Stop the current turn first.");
     const text = String(request || "").trim();
     if (!text) throw new Error("Request is empty.");
+    this.cancelResume();
     this.state.sessionId = randomUUID();
     this.state.origin = "dashboard";
     this.state.costUsd = 0;
+    this.state.limit = null;
+    this.state.resumeAttempts = 0;
     this.queue = [];
+    const message = this.recordCustomer(note === undefined ? text : note);
     // A plain prompt is a self-contained instruction (for example a hire request), not an /office project run.
     this.spawnTurn(plain ? text : `/office ${text}`, { newSession: true });
+    return { message };
   }
 
-  reply(message, { takeover = false } = {}) {
+  recordCustomer(text) {
+    return text ? this.record({ kind: "msg", from: "customer", to: "pm", text }) : null;
+  }
+
+  recordSystem(text, notice = true) {
+    return this.record({ kind: "system", notice, text });
+  }
+
+  reply(message, { takeover = false, note } = {}) {
     const text = String(message || "").trim();
     if (!text) throw new Error("Message is empty.");
     if (!this.state.sessionId) throw new Error("No run to reply to. Send a request first.");
@@ -149,17 +221,21 @@ export class RunController {
       throw err;
     }
     if (takeover) this.state.origin = "dashboard";
+    // A message from the customer takes the place of a planned automatic resume.
+    if (note !== null) this.cancelResume();
+    const recorded = this.recordCustomer(note === undefined ? text : note);
     if (this.state.busy) {
       this.queue.push(text);
       this.save();
-      return { queued: true };
+      return { queued: true, message: recorded };
     }
     this.spawnTurn(text, { newSession: false });
-    return { queued: false };
+    return { queued: false, message: recorded };
   }
 
   stop() {
     this.queue = [];
+    this.cancelResume();
     if (this.child) {
       this.child.kill();
     } else if (this.state.waitingSlot && this.scheduler.cancel(this)) {
@@ -253,6 +329,14 @@ export class RunController {
     } catch {
       return false;
     }
+    // Usage limits: the CLI sends a rate_limit_event, and the refused request comes back as an error message.
+    if (msg.type === "rate_limit_event" && msg.rate_limit_info && msg.rate_limit_info.status === "rejected") {
+      this.noteLimit(findResetsAt(msg.rate_limit_info), msg.rate_limit_info.rateLimitType);
+    }
+    if (msg.type === "assistant" && (msg.error === "rate_limit" || msg.message?.error === "rate_limit")) {
+      const info = msg.api_error_params?.rate_limit_info || msg.apiErrorParams?.rate_limit_info || {};
+      this.noteLimit(findResetsAt(msg), info.rateLimitType);
+    }
     if (msg.type === "assistant" && msg.message && !msg.parent_tool_use_id) {
       const text = (msg.message.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n")
         .replace(RELOAD_MARKER, "").trim();
@@ -262,6 +346,9 @@ export class RunController {
       if (typeof msg.total_cost_usd === "number") this.state.costUsd += msg.total_cost_usd;
       if (msg.is_error) this.resultError = String(msg.result || msg.subtype || "Unknown error");
       const result = String(msg.result || "");
+      if (msg.is_error && LIMIT_TEXT.test(result)) this.noteLimit(parseResetTime(result));
+      const replyText = result.replace(RELOAD_MARKER, "").trim();
+      if (!msg.is_error && replyText) this.record({ kind: "msg", from: "pm", to: "customer", text: replyText });
       if (!msg.is_error && result.includes(RELOAD_MARKER)) this.reloadRequested = true;
       this.broadcast("pm-reply", {
         text: result.replace(RELOAD_MARKER, "").trim(), isError: Boolean(msg.is_error), subtype: msg.subtype,
@@ -272,14 +359,92 @@ export class RunController {
     return false;
   }
 
+  // The first reset time seen wins: the rate_limit_event comes first and is exact, the text only names a clock time.
+  noteLimit(resetsAt, type) {
+    this.limitHit = {
+      resetsAt: this.limitHit?.resetsAt || resetsAt || null,
+      type: this.limitHit?.type || type || null,
+    };
+  }
+
+  // ---------- automatic resume after a usage limit ----------
+
+  armResume() {
+    clearTimeout(this.resumeTimer);
+    const delay = Math.min(MAX_TIMER_MS, Math.max(5000, this.state.resumeAt - Date.now()));
+    this.resumeTimer = setTimeout(() => this.resumeNow(), delay);
+    this.resumeTimer.unref?.();
+  }
+
+  // Plans the resume for the current limit when the setting is on. Returns true when a resume is planned.
+  planResume() {
+    const limit = this.state.limit;
+    if (!limit || !this.state.sessionId || this.state.origin !== "dashboard" || !this.getSettings().autoResume) return false;
+    if (this.state.resumeAttempts >= MAX_RESUME_ATTEMPTS) return false;
+    const now = Date.now();
+    // Without a known reset time (or when it has passed but the limit is still there), try again later.
+    const base = limit.resetsAt && limit.resetsAt > now ? limit.resetsAt : now + UNKNOWN_RESET_RETRY_MS;
+    this.state.resumeAt = base + RESUME_MARGIN_MS;
+    this.armResume();
+    return true;
+  }
+
+  cancelResume() {
+    clearTimeout(this.resumeTimer);
+    this.resumeTimer = null;
+    if (this.state.resumeAt) {
+      this.state.resumeAt = null;
+      this.save();
+    }
+  }
+
+  resumeNow() {
+    clearTimeout(this.resumeTimer);
+    this.resumeTimer = null;
+    this.state.resumeAt = null;
+    if (this.state.busy || !this.state.sessionId || !this.getSettings().autoResume) {
+      this.save();
+      return false;
+    }
+    this.state.resumeAttempts += 1;
+    this.recordSystem("The usage limit has reset: the PM continues automatically.", false);
+    this.spawnTurn(RESUME_PROMPT, { newSession: false });
+    return true;
+  }
+
+  // The customer turned auto continue on or off in the department settings.
+  settingsChanged() {
+    if (!this.getSettings().autoResume) return this.cancelResume();
+    if (!this.state.busy && !this.state.resumeAt && this.state.limit && this.state.lastError) {
+      this.state.resumeAttempts = 0;
+      if (this.planResume()) {
+        this.save();
+        this.recordSystem(`Auto continue is on: the PM continues at ${new Date(this.state.resumeAt).toLocaleString()}.`, false);
+      }
+    }
+  }
+
   finish(processError) {
     const error = processError || this.resultError || null;
+    const limit = error && this.limitHit ? { ...this.limitHit, at: Date.now() } : null;
+    this.limitHit = null;
     this.child = null;
     this.state.busy = false;
     this.state.waitingSlot = false;
     this.state.lastError = error;
+    this.state.limit = limit;
+    if (!error) this.state.resumeAttempts = 0;
+    const resuming = Boolean(limit) && this.planResume();
     this.save();
-    this.broadcast("pm-turn", { status: "ended", error });
+    this.broadcast("pm-turn", { status: "ended", error, limit, resumeAt: this.state.resumeAt });
+    if (limit) {
+      const reset = limit.resetsAt ? new Date(limit.resetsAt).toLocaleString() : "an unknown time";
+      this.recordSystem(resuming
+        ? `Usage limit reached (resets ${reset}). Auto continue is on: the PM continues at ${new Date(this.state.resumeAt).toLocaleString()}.`
+        : `Usage limit reached (resets ${reset}). Send a message after the reset, or turn on auto continue in the department settings.`);
+    } else if (error) {
+      this.recordSystem(`The PM stopped: ${error.slice(0, 300)}`);
+    }
     // A turn that created new agents asks for a restart: continue automatically (a few times at most),
     // but only when agent files really changed, so a failed write cannot loop.
     const agentsChanged = this.reloadRequested && this.agentSignature() !== this.agentsAtStart;
@@ -290,10 +455,12 @@ export class RunController {
       this.autoReloads = 0;
     } else if (!agentsChanged) {
       this.broadcast("pm-turn", { status: "note", text: "The PM asked to reload the team, but no agent file changed." });
+      this.recordSystem("The PM asked to reload the team, but no agent file changed.", false);
     }
     this.reloadRequested = false;
     const next = !error && this.queue.length ? this.queue.shift() : null;
-    if (error) this.queue = [];
+    // Messages queued before a usage limit wait for the automatic resume.
+    if (error && !resuming) this.queue = [];
     this.scheduler.release(this);
     if (next) this.spawnTurn(next, { newSession: false });
   }

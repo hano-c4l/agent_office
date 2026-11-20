@@ -75,10 +75,25 @@ function snapshot() {
   };
 }
 
+// Behind a proxy or tunnel (Cloudflare Tunnel), the stream must not be compressed or buffered, or events
+// only arrive in large batches or never: no-transform stops compression, X-Accel-Buffering stops buffering,
+// and a padding comment pushes the first bytes through proxies that wait for a minimum size.
+const STREAM_PADDING = `: ${" ".repeat(2048)}\n\n`;
+const STREAM_PING_MS = 15000;
+
 function openStream(req, res) {
+  req.socket.setNoDelay(true);
+  req.socket.setKeepAlive(true);
   res.writeHead(200, {
-    "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive",
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-store, no-transform",
+    "Content-Encoding": "identity",
+    "X-Accel-Buffering": "no",
+    Connection: "keep-alive",
   });
+  res.flushHeaders();
+  // The browser reconnects after this many milliseconds when the stream drops.
+  res.write(`retry: 3000\n${STREAM_PADDING}`);
   res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot())}\n\n`);
   clients.add(res);
   req.on("close", () => clients.delete(res));
@@ -139,9 +154,17 @@ async function handleDepartment(req, res, dept, parts) {
   if (section === "run" && req.method === "POST") {
     const body = await readBody(req);
     const runner = dept.runner;
-    if (sub === "start") { runner.start(body.request); return send(res, 200, runner.publicState()); }
+    if (sub === "start") { const started = runner.start(body.request); return send(res, 200, { ...runner.publicState(), ...started }); }
     if (sub === "reply") return send(res, 200, { ...runner.reply(body.text, { takeover: Boolean(body.takeover) }), ...runner.publicState() });
     if (sub === "stop") { runner.stop(); return send(res, 200, runner.publicState()); }
+  }
+
+  if (section === "settings" && !sub && req.method === "GET") return send(res, 200, dept.settings());
+  if (section === "settings" && !sub && req.method === "PUT") {
+    const settings = dept.updateSettings(await readBody(req));
+    company.save();
+    broadcast("department-info", { dept: dept.id, data: dept.publicInfo() });
+    return send(res, 200, { settings, runner: dept.runner.publicState() });
   }
 
   if (section === "room" && sub === "randomize" && req.method === "POST") {
@@ -207,8 +230,8 @@ async function handleApi(req, res, url) {
           const dept = await company.create(body);
           // A migrated project starts with onboarding even without a request; a new one waits for a request.
           const prompt = company.firstPrompt(dept, body.request);
-          if (prompt) dept.runner.start(prompt);
-          return send(res, 200, dept.snapshot({ withEvents: false }));
+          if (prompt) dept.runner.start(prompt, { note: String(body.request || "").trim() || null });
+          return send(res, 200, { ...dept.snapshot({ withEvents: false }), messages: dept.recentMessages() });
         }
       }
       const dept = company.get(id);
@@ -249,7 +272,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 setInterval(() => company.pollAll(), 500);
-setInterval(() => clients.forEach((res) => res.write(": ping\n\n")), 20000);
+// A named event (not a comment) so the dashboard can tell a live stream from one a proxy holds back.
+setInterval(() => clients.forEach((res) => res.write(`event: ping\ndata: ${Date.now()}\n\n`)), STREAM_PING_MS);
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`Agent Office dashboard: http://localhost:${PORT} (${company.list().length} departments)`);

@@ -11,7 +11,8 @@
 <body>
   <header class="topbar">
     <div class="brand"><span class="logo">🏢</span> Agent Office
-      <span class="mode-badge live-only">LIVE</span><span class="mode-badge demo demo-only">DEMO</span></div>
+      <span class="mode-badge live-only">LIVE</span><span class="mode-badge demo demo-only">DEMO</span>
+      <span class="mode-badge offline" id="offlineBadge" hidden title="The live stream dropped; reconnecting">RECONNECTING…</span></div>
     <div class="company-stats" id="companyStats"></div>
     <button class="btn primary" id="newDeptBtn">+ Department</button>
   </header>
@@ -41,6 +42,7 @@
       </div>
       <div class="room-progress"><div class="bar"><i id="roomBar"></i></div><b id="roomPct">0%</b></div>
       <div class="room-actions">
+        <button class="btn" id="settingsBtn" title="Department settings" aria-label="Department settings">⚙ Settings</button>
         <button class="btn" id="hireBtn">+ Hire staff</button>
         <button class="btn" id="releaseBtn" title="Merge preview into main and push">Release to main</button>
         <button class="btn danger" id="removeDeptBtn" title="Close the department on the dashboard (its folder and repository are kept)">Close department</button>
@@ -204,6 +206,37 @@
         <footer class="modal-foot">
           <button type="button" class="btn" data-hire-cancel>Cancel</button>
           <button type="submit" class="btn primary" id="hireManualBtn">Hire</button>
+        </footer>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="settingsModal" hidden>
+    <div class="modal narrow" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <header class="modal-head">
+        <div>
+          <h2 id="settingsTitle">Department settings</h2>
+          <p class="muted" id="settingsHelp"></p>
+        </div>
+        <button class="icon-btn" id="settingsClose" aria-label="Close">×</button>
+      </header>
+      <form id="settingsForm" class="create-form">
+        <div class="setting-row">
+          <div class="setting-text">
+            <b id="autoResumeLabel">Auto continue after the usage limit resets</b>
+            <p class="muted">When the PM stops on a usage limit (for example the 5-hour limit), the dashboard waits for
+              the reset and tells the PM to continue in the same session. Keep the office server running.</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" name="autoResume" id="autoResume" aria-labelledby="autoResumeLabel">
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-state" id="autoResumeState">OFF</span>
+          </label>
+        </div>
+        <p class="setting-status" id="settingsStatus" hidden></p>
+        <p class="form-error" id="settingsError" role="alert" hidden></p>
+        <footer class="modal-foot">
+          <button type="button" class="btn" id="settingsCancel">Close</button>
         </footer>
       </form>
     </div>

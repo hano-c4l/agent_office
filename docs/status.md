@@ -22,10 +22,12 @@ decoration).
 | PM | Navy blazer, gold tie and pin, headset, 6 executive desks and 4 executive chairs, name plate and two screens, star on the name tag |
 | Room scenes | One scene per status with several variants per person; short flashes for the tool in use, a failed command and a finished task; tasks and reports flying between desks; confetti on delivery; moving furniture; windows follow the time of day |
 | Breaks | Idle staff walk to a place and use it: sit (sofa, tables, stools, bench, armchair, beanbags, nap pods, massage chair), play (ping-pong, arcade, table football, gaming corner, band, treadmill), coffee, pets, door; group breaks of two to four people in the lounge; cleaning robot, wandering cat or dog and a courier |
-| Customer channel | Client desk, Messages and Activity tabs, "Needs your reply" markers, chat runs can be taken over from the dashboard |
+| Customer channel | Client desk, Messages and Activity tabs, "Needs your reply" markers, chat runs can be taken over from the dashboard; the message history is saved in `.office/messages.jsonl` and survives restarts |
+| Department settings | ⚙ Settings in the room; **Auto continue after the usage limit resets** (default OFF) resumes the PM's session after a usage limit such as the 5-hour limit |
+| Remote access | Extra host names in `office/server.json` (`office.hanowl.com`) behind Cloudflare Tunnel and Access; unbuffered live stream with pings, reconnect after 40 s of silence |
 | Runner | Claude CLI in print mode, allowed and blocked tools in `office/runner.json`, up to two PM runs in parallel, runs stop with the server |
 | Local API safety | Bound to 127.0.0.1; refuses requests from other sites and rebound host names; writes need JSON |
-| Tests | `npm test`: 15 server tests (request guard, agent files, staff store and desks, room items, scheduler, new workspace, office update, release, migration) |
+| Tests | `npm test`: 21 server tests (also message history, settings, usage limit detection and resume) (request guard, agent files, staff store and desks, room items, scheduler, new workspace, office update, release, migration) |
 
 ## Tested with real runs
 
@@ -77,6 +79,17 @@ Not checked in the browser for that update: live mode with a real run, narrow sc
 Not checked in the browser for that update: swapping an item in live mode (the server route is covered by a test),
 narrow screens, and the scenes at the new places (band, nap pods, treadmill, massage chair, the dog's walk).
 
+## Checked for the settings and remote access update of 2026-11-20 (no PM runs)
+
+| Check | Result |
+|---|---|
+| `npm test` | 21 of 21 pass |
+| Live mode in the browser (second server on port 5179) | Rooms load; ⚙ Settings opens, the switch saves ON and OFF on a real department; no horizontal scroll at 375 px; no console errors |
+| Live stream | Headers `no-cache, no-store, no-transform`, `Content-Encoding: identity`, `X-Accel-Buffering: no`; the first 64 KB arrive in about 20 ms |
+
+Not checked: a real usage limit (the parsing follows the `rate_limit_event` and error shapes of Claude CLI 2.1.322 and
+is covered by tests with sample lines), and the dashboard through the real tunnel (Cloudflare Access needs a sign-in).
+
 ## Fixed in that review
 
 - `templates/workspace/CLAUDE.md` was not in git (the `workspace/` ignore rule also matched `templates/workspace/`),
@@ -88,6 +101,11 @@ narrow screens, and the scenes at the new places (band, nap pods, treadmill, mas
 - A folder with an unreadable entry broke the folder picker; a malformed URL answered 500 instead of 400.
 
 ## Known limits
+
+- **Message history starts with this update**: older departments show the hook copies of their messages (the PM's
+  replies there are clipped) until new messages are saved.
+- **Auto continue needs the server**: the resume runs in the office server; if the computer sleeps through the
+  reset, it runs when the server is back.
 
 - **Rooms changed their look.** A room is generated from its seed, and the generator has more choices now, so every
   existing room looks different after each of these updates. **🎲 Room** picks another one.

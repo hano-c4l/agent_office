@@ -4,6 +4,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { OFFICE_DIR, ROOT, DEFAULT_WORKSPACE_ROOT } from "./paths.mjs";
 import { StaffStore, isValidId } from "./staff-store.mjs";
 import { RunController } from "./run-controller.mjs";
@@ -43,6 +44,13 @@ const HIRE_APPROVED = [
 
 const REGISTRY_FILE = path.join(OFFICE_DIR, "departments.json");
 const REPLAY_EVENTS = 200;
+// The message history (customer, PM replies, notices) survives server restarts in .office/messages.jsonl.
+const REPLAY_MESSAGES = 300;
+const MAX_MESSAGES_FILE = 2 * 1024 * 1024;
+const KEEP_MESSAGES = 1000;
+const MAX_MESSAGE_TEXT = 20000;
+// Department settings and their defaults.
+export const DEFAULT_SETTINGS = Object.freeze({ autoResume: false });
 const MAX_EVENT_LINE = 1024 * 1024;
 const MODELS = new Set(["opus", "sonnet", "haiku"]);
 // Room item slots: "lounge", "shelf", "cabinet", "vacuum", "wall.<n>", "floor.<n>".
@@ -95,6 +103,7 @@ export class Department {
       tasks: path.join(this.office, "tasks.json"),
       proposal: path.join(this.office, "proposal.json"),
       run: path.join(this.office, "active-run.json"),
+      messages: path.join(this.office, "messages.jsonl"),
     };
     this.store = new StaffStore(this.root);
     this.broadcast = (type, data) => broadcast(type, { dept: this.id, data });
@@ -113,6 +122,8 @@ export class Department {
         }).join("|");
       },
       broadcast: this.broadcast,
+      record: (entry) => this.addMessage(entry),
+      getSettings: () => this.settings(),
     });
     this.eventsOffset = fs.existsSync(this.files.events) ? fs.statSync(this.files.events).size : 0;
     this.mtimes = {};
@@ -133,10 +144,60 @@ export class Department {
     }
   }
 
+  // ---------- message history ----------
+
+  addMessage(entry) {
+    const text = String(entry.text || "").slice(0, MAX_MESSAGE_TEXT);
+    if (!text) return null;
+    const message = {
+      id: randomUUID(), ts: new Date().toISOString(), kind: entry.kind === "system" ? "system" : "msg",
+      from: entry.from, to: entry.to, notice: Boolean(entry.notice), text,
+    };
+    try {
+      fs.mkdirSync(this.office, { recursive: true });
+      fs.appendFileSync(this.files.messages, JSON.stringify(message) + "\n");
+      if (fs.statSync(this.files.messages).size > MAX_MESSAGES_FILE) {
+        const lines = fs.readFileSync(this.files.messages, "utf8").split("\n").filter(Boolean);
+        fs.writeFileSync(this.files.messages, lines.slice(-KEEP_MESSAGES).join("\n") + "\n");
+      }
+    } catch (err) {
+      console.warn(`[${this.id}] could not save a message: ${err.message}`);
+    }
+    this.broadcast("message", message);
+    return message;
+  }
+
+  recentMessages(limit = REPLAY_MESSAGES) {
+    try {
+      const lines = fs.readFileSync(this.files.messages, "utf8").split("\n").filter(Boolean);
+      return lines.slice(-limit).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  // ---------- settings ----------
+
+  settings() {
+    return { ...DEFAULT_SETTINGS, ...(this.info.settings || {}) };
+  }
+
+  updateSettings(body) {
+    const next = this.settings();
+    if (body && "autoResume" in body) {
+      if (typeof body.autoResume !== "boolean") throw badRequest("autoResume must be true or false.");
+      next.autoResume = body.autoResume;
+    }
+    this.info.settings = next;
+    try { writeDepartmentFile(this.root, this.info); } catch { /* the workspace may be missing */ }
+    this.runner.settingsChanged();
+    return next;
+  }
+
   // The department info plus what the dashboard needs to know about the folder right now.
   publicInfo() {
     const missing = !this.exists();
-    return { ...this.info, missing, officeOutdated: !missing && officeFilesOutdated(this.root, this.info) };
+    return { ...this.info, settings: this.settings(), missing, officeOutdated: !missing && officeFilesOutdated(this.root, this.info) };
   }
 
   snapshot({ withEvents = true } = {}) {
@@ -149,6 +210,7 @@ export class Department {
       run: readJson(this.files.run, null),
       runner: this.runner.publicState(),
       events: withEvents ? this.recentEvents() : [],
+      messages: withEvents ? this.recentMessages() : [],
     };
   }
 
@@ -272,10 +334,11 @@ export class Department {
     this.changed("proposal");
     // For a run driven by the dashboard, tell the PM right away.
     if (next.status === "approved" && body.status === "approved" && this.runner.state.origin === "dashboard") {
-      if (next.kind === "hire") this.runner.reply(HIRE_APPROVED);
+      if (next.kind === "hire") this.runner.reply(HIRE_APPROVED, { note: "Hire approved." });
       else {
         this.runner.reply("I approved the team on the dashboard (.office/proposal.json). Create the team. " +
-          "Then continue with my request; if I have not given you a request yet, ask me what to build first and wait.");
+          "Then continue with my request; if I have not given you a request yet, ask me what to build first and wait.",
+        { note: "Team approved." });
       }
     }
     return next;
@@ -300,13 +363,13 @@ export class Department {
     const pending = readJson(this.files.proposal, null);
     if (pending && pending.status === "pending") throw new Error("A proposal is already waiting for your approval. Approve or reject it first.");
     const prompt = hirePrompt(text, model);
+    const note = `Hire request: ${text}`;
     const r = this.runner.state;
-    if (r.sessionId && r.origin === "dashboard") return this.runner.reply(prompt);
+    if (r.sessionId && r.origin === "dashboard") return this.runner.reply(prompt, { note });
     if (r.sessionId && r.origin === "chat" && this.run()?.status === "running") {
       throw new Error("A run is active in a Claude chat session. Ask the PM there, or take the run over first.");
     }
-    this.runner.start(prompt, { plain: true });
-    return { queued: false };
+    return { queued: false, ...this.runner.start(prompt, { plain: true, note }) };
   }
 
   run() {
@@ -440,7 +503,7 @@ export class Company {
         id: this.uniqueId(openName), name: openName, pmModel: saved.pmModel || pmModel, workspace,
         repo: saved.repo || folder.origin || "", mode: saved.mode || "new", createdAt: saved.createdAt || new Date().toISOString(),
         theme: Number.isInteger(saved.theme) ? saved.theme : this.pickTheme(), roomSeed: saved.roomSeed, roomItems: saved.roomItems,
-        migration: saved.migration, docFolders: saved.docFolders || [],
+        migration: saved.migration, docFolders: saved.docFolders || [], settings: saved.settings,
       };
       writeDepartmentFile(workspace, info);
       setup = { log: ["Opened the existing department."], warnings: [] };
