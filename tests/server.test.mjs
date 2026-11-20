@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { checkRequest, hostName, normalizeHosts } from "../server/http-guard.mjs";
 import { parseAgentFile, serializeAgentFile, StaffStore, isValidId } from "../server/staff-store.mjs";
-import { Scheduler } from "../server/run-controller.mjs";
+import { Scheduler, parseResetTime, RESUME_PROMPT } from "../server/run-controller.mjs";
 import { slugify, Department } from "../server/departments.mjs";
 import { guessRole, titleFromId, randomPerson } from "../server/people.mjs";
 import {
@@ -193,6 +193,95 @@ test("room: swapped items are kept, checked and cleared by a new room", (t) => {
   dept.randomizeRoom();
   assert.equal(dept.info.roomItems, undefined);
   assert.ok(Number.isInteger(dept.info.roomSeed));
+});
+
+// ---------- message history and settings ----------
+
+test("messages: the history is saved in the workspace and comes back after a restart", (t) => {
+  const root = tempDir(t);
+  const sent = [];
+  const dept = new Department(department(root), { scheduler: new Scheduler(), broadcast: (type, data) => sent.push(type) });
+  const m1 = dept.addMessage({ kind: "msg", from: "customer", to: "pm", text: "Build a shop" });
+  dept.addMessage({ kind: "msg", from: "pm", to: "customer", text: "Which payment provider?" });
+  dept.addMessage({ kind: "system", notice: true, text: "" });
+  assert.ok(m1.id && m1.ts);
+  assert.equal(sent.filter((type) => type === "message").length, 2, "an empty message is not kept");
+  const again = new Department(department(root), { scheduler: new Scheduler(), broadcast() {} });
+  const history = again.snapshot().messages;
+  assert.deepEqual(history.map((m) => [m.from, m.text]), [["customer", "Build a shop"], ["pm", "Which payment provider?"]]);
+});
+
+test("settings: auto continue is off by default, saved with the department and checked", (t) => {
+  const root = tempDir(t);
+  const dept = new Department(department(root), { scheduler: new Scheduler(), broadcast() {} });
+  assert.equal(dept.settings().autoResume, false);
+  assert.equal(dept.publicInfo().settings.autoResume, false);
+  assert.throws(() => dept.updateSettings({ autoResume: "yes" }), /true or false/);
+  dept.updateSettings({ autoResume: true });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, ".office", "department.json"), "utf8")).settings.autoResume, true);
+});
+
+// ---------- usage limits ----------
+
+test("usage limit: reset times are read from the CLI text", () => {
+  const now = new Date(2026, 10, 20, 10, 0, 0).getTime();
+  assert.equal(parseResetTime("Claude AI usage limit reached|1795161600", now), 1795161600 * 1000);
+  assert.equal(parseResetTime("You've hit your limit · resets 3pm (Asia/Saigon)", now), new Date(2026, 10, 20, 15, 0).getTime());
+  assert.equal(parseResetTime("5-hour limit reached ∙ resets 9:30am", now), new Date(2026, 10, 21, 9, 30).getTime(), "a passed time is tomorrow");
+  assert.equal(parseResetTime("Something else went wrong", now), null);
+});
+
+test("usage limit: with auto continue on, the PM resumes the same session after the reset", (t) => {
+  const root = tempDir(t);
+  const dept = new Department(department(root), { scheduler: new Scheduler(), broadcast() {} });
+  const runner = dept.runner;
+  t.after(() => runner.cancelResume());
+  const prompts = [];
+  runner.spawnTurn = (prompt) => { prompts.push(prompt); runner.state.busy = true; };
+  Object.assign(runner.state, { sessionId: "s-1", origin: "dashboard", busy: true });
+  const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+
+  // Turned off: the limit is reported, nothing is planned.
+  runner.handleLine(JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt, rateLimitType: "five_hour" } }));
+  runner.handleLine(JSON.stringify({ type: "result", is_error: true, result: "You've hit your limit · resets 3pm" }));
+  runner.finish(null);
+  assert.equal(runner.state.limit.resetsAt, resetsAt * 1000);
+  assert.equal(runner.state.limit.type, "five_hour");
+  assert.equal(runner.state.resumeAt, null);
+  assert.match(dept.recentMessages().at(-1).text, /Usage limit reached/);
+
+  // Turning it on afterwards plans the resume for the reset (plus a margin), and it survives a restart.
+  dept.updateSettings({ autoResume: true });
+  assert.ok(runner.state.resumeAt >= resetsAt * 1000 && runner.state.resumeAt <= resetsAt * 1000 + 120000);
+  const saved = JSON.parse(fs.readFileSync(path.join(root, ".office", "runner-state.json"), "utf8"));
+  assert.equal(saved.resumeAt, runner.state.resumeAt);
+
+  // At the reset, the PM gets the continue prompt in the same session.
+  assert.equal(runner.resumeNow(), true);
+  assert.equal(prompts.at(-1), RESUME_PROMPT);
+  assert.equal(runner.state.sessionId, "s-1");
+
+  // A turn that works again clears the limit; turning the setting off cancels a planned resume.
+  runner.finish(null);
+  assert.equal(runner.state.limit, null);
+  Object.assign(runner.state, { busy: true });
+  runner.handleLine(JSON.stringify({ type: "assistant", error: "rate_limit", message: { content: [] } }));
+  runner.finish("Claude CLI exited with code 1");
+  assert.ok(runner.state.resumeAt, "an unknown reset time is retried later");
+  dept.updateSettings({ autoResume: false });
+  assert.equal(runner.state.resumeAt, null);
+});
+
+test("usage limit: an ordinary error does not count as a limit", (t) => {
+  const root = tempDir(t);
+  const dept = new Department(department(root), { scheduler: new Scheduler(), broadcast() {} });
+  dept.updateSettings({ autoResume: true });
+  Object.assign(dept.runner.state, { sessionId: "s-2", origin: "dashboard", busy: true });
+  dept.runner.handleLine(JSON.stringify({ type: "result", is_error: true, result: "Tool failed" }));
+  dept.runner.finish(null);
+  assert.equal(dept.runner.state.limit, null);
+  assert.equal(dept.runner.state.resumeAt, null);
+  assert.match(dept.recentMessages().at(-1).text, /The PM stopped: Tool failed/);
 });
 
 // ---------- scheduler ----------

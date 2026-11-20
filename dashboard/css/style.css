@@ -588,6 +588,23 @@ legend { font-weight: 800; font-size: 12px; padding: 0 4px; }
 .small-note { font-size: 12px; margin: 10px 0 0; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 
+/* ---------- department settings ---------- */
+.setting-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; border: 2px solid var(--line); border-radius: 8px; padding: 12px 14px; background: #fff; }
+.setting-text { min-width: 0; }
+.setting-text p { margin: 4px 0 0; font-size: 13px; }
+.switch { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-shrink: 0; position: relative; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch-track { width: 46px; height: 26px; border-radius: 13px; background: #c9c2cc; border: 2px solid #3a2f3f; position: relative; transition: background .15s; }
+.switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 2px solid #3a2f3f; transition: transform .15s; }
+.switch input:checked + .switch-track { background: var(--working); }
+.switch input:checked + .switch-track::after { transform: translateX(20px); }
+.switch input:focus-visible + .switch-track { outline: 3px solid var(--talking); outline-offset: 2px; }
+.switch input:disabled + .switch-track { opacity: .5; }
+.switch-state { font-weight: 800; min-width: 30px; }
+.setting-status { margin: 0; background: #eef4ff; color: #2b5ea7; border-radius: 6px; padding: 8px 10px; font-weight: 700; font-size: 13px; }
+.mode-badge.offline { background: #c2405a; color: #fff; }
+@media (max-width: 480px) { .setting-row { flex-direction: column; align-items: flex-start; } }
+
 /* ---------- department modal: modes and folder picker ---------- */
 .mode-tabs { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
 .mode-tabs button {
